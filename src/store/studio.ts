@@ -104,10 +104,12 @@ interface StudioState {
   resumeImage(): void;
   stepImage(): void;
 
-  sidebar: "files" | "search";
+  sidebar: "files" | "search" | "agent";
   /** A search hit the editor should scroll to (nonce makes repeated clicks on one hit work). */
   reveal: { path: string; line: number; column: number; length: number; nonce: number } | null;
-  setSidebar(mode: "files" | "search"): void;
+  setSidebar(mode: "files" | "search" | "agent"): void;
+  /** Saves what is open in the editors into the project. */
+  flushEditors(): void;
   revealMatch(match: SearchMatch): void;
 
   openTerminal(): void;
@@ -239,6 +241,10 @@ export const useStudio = create<StudioState>((set, get) => {
 
     setActiveTerminal(index) {
       set({ activeTerminal: index });
+    },
+
+    flushEditors() {
+      flushEditors?.();
     },
 
     registerFlush(fn) {

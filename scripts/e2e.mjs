@@ -130,6 +130,34 @@ await page.getByLabel("Search in files").fill("echo");
 await page.waitForTimeout(500);
 await page.screenshot({ path: ".scratch/phase3.png" });
 
+// the AI gateway: the provider endpoint is answered by the test, so no real key is involved
+const seen = [];
+await page.route("https://api.anthropic.com/v1/messages", async (route) => {
+  const request = route.request();
+  seen.push({ key: request.headers()["x-api-key"], body: JSON.parse(request.postData() ?? "{}") });
+  const turn = seen.length;
+  const content =
+    turn === 1
+      ? [{ type: "text", text: "I will create a file." }, { type: "tool_use", id: "tu1", name: "run_command", input: { command: "echo agent-says-hi > from-agent.txt" } }]
+      : [{ type: "text", text: "Created from-agent.txt." }];
+  await route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify({ content, stop_reason: turn === 1 ? "tool_use" : "end_turn" }) });
+});
+await page.getByRole("tab", { name: "Agent" }).click();
+const agent = page.getByLabel("Coding agent");
+await agent.getByLabel("API key").fill("sk-test-not-real");
+await agent.getByLabel("Message to the agent").fill("create a file from-agent.txt");
+await agent.getByRole("button", { name: "Send" }).click();
+const approval = page.getByRole("alertdialog", { name: "Approve action" });
+await approval.waitFor({ timeout: 15000 });
+await page.screenshot({ path: ".scratch/agent.png" });
+await approval.getByRole("button", { name: "Allow" }).click();
+await agent.getByText("Created from-agent.txt.").waitFor({ timeout: 60000 });
+if (seen[0].key !== "sk-test-not-real" || !seen[0].body.tools.length) throw new Error("provider request is wrong");
+if (JSON.stringify(await page.evaluate(() => Object.entries(localStorage))).includes("sk-test-not-real")) throw new Error("the API key leaked into localStorage");
+await page.getByRole("tab", { name: "Files" }).click();
+await page.getByText("from-agent.txt").first().waitFor({ timeout: 15000 });
+log("AI gateway: the agent asked, ran a command in the real OS, and the new file is in the project");
+
 // the display: the VGA console shows a login shell, and keys typed there reach the guest
 await page.getByRole("tab", { name: "Display" }).click();
 const screen = page.getByLabel("Machine display");

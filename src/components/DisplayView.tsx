@@ -3,18 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { scancodes } from "@/os/keyboard";
 import type { DisplayFrame } from "@/os/runtime/display";
+import { CP437 } from "@/os/runtime/cp437";
 import { DebugPanel } from "./DebugPanel";
 import { useStudio } from "@/store/studio";
-
-/** Code page 437, the character set of the PC text console, as Unicode. */
-const CP437 = (() => {
-  const low = "\0☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼";
-  const high =
-    "⌂ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■ ";
-  let ascii = "";
-  for (let c = 0x20; c < 0x7f; c++) ascii += String.fromCharCode(c);
-  return [...(low + ascii + high)];
-})();
 
 const hex = (n: number) => "#" + n.toString(16).padStart(6, "0");
 const FONT = "16px ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace";

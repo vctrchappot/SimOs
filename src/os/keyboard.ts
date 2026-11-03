@@ -33,6 +33,35 @@ const EXTENDED: Record<string, number> = {
   ContextMenu: 0x5d,
 };
 
+const SHIFTED: Record<string, string> = {
+  "!": "Digit1", "@": "Digit2", "#": "Digit3", $: "Digit4", "%": "Digit5", "^": "Digit6", "&": "Digit7", "*": "Digit8", "(": "Digit9", ")": "Digit0",
+  _: "Minus", "+": "Equal", "{": "BracketLeft", "}": "BracketRight", ":": "Semicolon", '"': "Quote", "~": "Backquote", "|": "Backslash",
+  "<": "Comma", ">": "Period", "?": "Slash",
+};
+const PLAIN: Record<string, string> = {
+  "-": "Minus", "=": "Equal", "[": "BracketLeft", "]": "BracketRight", ";": "Semicolon", "'": "Quote", "`": "Backquote", "\\": "Backslash",
+  ",": "Comma", ".": "Period", "/": "Slash", " ": "Space", "\n": "Enter", "\t": "Tab",
+};
+
+/** Scancodes that type the text on a US keyboard layout (characters without a key are skipped). */
+export function keysForText(text: string): number[] {
+  const out: number[] = [];
+  for (const ch of text) {
+    let code: string | undefined;
+    let shift = false;
+    if (/[a-z]/.test(ch)) code = "Key" + ch.toUpperCase();
+    else if (/[A-Z]/.test(ch)) (code = "Key" + ch), (shift = true);
+    else if (/[0-9]/.test(ch)) code = "Digit" + ch;
+    else if (ch in PLAIN) code = PLAIN[ch];
+    else if (ch in SHIFTED) (code = SHIFTED[ch]), (shift = true);
+    if (!code) continue;
+    if (shift) out.push(...scancodes("ShiftLeft", true)!);
+    out.push(...scancodes(code, true)!, ...scancodes(code, false)!);
+    if (shift) out.push(...scancodes("ShiftLeft", false)!);
+  }
+  return out;
+}
+
 /** The bytes for pressing or releasing a key, or null for keys a PC keyboard doesn't have. */
 export function scancodes(code: string, down: boolean): number[] | null {
   const release = down ? 0 : 0x80;

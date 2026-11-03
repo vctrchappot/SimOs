@@ -41,6 +41,17 @@ Nothing in the terminal is simulated: commands are executed by the guest's own `
 - **A real display.** The *Display* tab shows the machine's VGA screen, with a login shell on `tty1`, and sends your
   keyboard (and mouse, in graphics modes) to the guest's PS/2 devices. Text and pixel modes both work, so a
   bare-metal OS or a framebuffer program has somewhere to draw.
+- **A coding agent with your own key (AI gateway).** The *Agent* tab in the sidebar connects to the provider you choose
+  (Anthropic, or anything that speaks the OpenAI chat API: OpenAI, OpenRouter, a local Ollama or LM Studio) with
+  *your* API key, and lets that model work in SimOs: read, search and edit project files, run shell commands in the
+  real Linux, boot images, use the debugger, read the screen and type on the keyboard. Nothing goes through a SimOs
+  server: the browser calls the provider directly. The key is kept in this tab's session storage (or, if you tick
+  *Remember*, in local storage), never in the project, never in an export, and is only ever sent to the address you
+  entered, which must be https (http only for localhost). What the agent reads (files, command output, the screen)
+  is sent to that provider too. Approvals: *ask for every change* (default), *edit and run freely*, or *everything
+  except deletes*; deleting files and changing the network always ask. A *Stop* button interrupts it, including a
+  running command. Browsers need the provider to allow cross-origin calls (Anthropic does with a key; some
+  providers do not, and then a small proxy of your own is needed). Code: `src/os/agent/`.
 - Power on / Power off / Restart / Reset the machine; the project survives all of them and page reloads.
 
 ## Quick start
@@ -183,7 +194,7 @@ Phase 6 added the bare-metal debugger, with an x86 decoder for disassembly and s
 
 Phase 7 added the graphical system (framebuffer kernel, X desktop).
 
-Next: an AI gateway so you can drive all of this with your own coding agent (bring your own key).
+Phase 8 added the AI gateway: bring your own key and drive all of the above with a coding agent.
 
 ## Third-party software
 
