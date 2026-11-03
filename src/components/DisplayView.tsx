@@ -20,8 +20,16 @@ const FONT = "16px ui-monospace, 'Cascadia Mono', Consolas, Menlo, monospace";
 
 /** The machine's screen: VGA text console or graphics, with keyboard and mouse going to the guest. */
 export function DisplayView({ active }: { active: boolean }) {
-  const runtime = useStudio((s) => s.studio)!.runtime;
-  const status = useStudio((s) => s.status);
+  const linux = useStudio((s) => s.studio)!.runtime;
+  const bare = useStudio((s) => s.bare);
+  const source = useStudio((s) => s.displaySource);
+  const linuxStatus = useStudio((s) => s.status);
+  const bareStatus = useStudio((s) => s.bareStatus);
+  const bareLog = useStudio((s) => s.bareLog);
+  const { setDisplaySource, stopImage } = useStudio.getState();
+  // Everything below talks to whichever machine the tab is showing.
+  const runtime = source === "image" && bare ? bare : linux;
+  const status = source === "image" ? bareStatus : linuxStatus;
   const canvas = useRef<HTMLCanvasElement>(null);
   const graphic = useRef(false);
   const [live, setLive] = useState(false);
@@ -81,6 +89,11 @@ export function DisplayView({ active }: { active: boolean }) {
     };
   }, [runtime, active]);
 
+  // Switching machines (or powering one off) leaves a stale picture behind.
+  useEffect(() => {
+    setLive(false);
+  }, [source]);
+
   // A powered-off machine has no signal.
   useEffect(() => {
     if (status === "stopped") setLive(false);
@@ -119,8 +132,30 @@ export function DisplayView({ active }: { active: boolean }) {
     }
   };
 
+  const logRef = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
+  }, [bareLog]);
+
   return (
     <div className="relative flex h-full w-full flex-col bg-black" style={{ display: active ? "flex" : "none" }}>
+      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-line bg-panel px-2 text-[12px]">
+        {(["linux", "image"] as const).map((k) => (
+          <button
+            key={k}
+            onClick={() => setDisplaySource(k)}
+            aria-pressed={source === k}
+            className={`rounded px-2 py-0.5 ${source === k ? "bg-hover text-fg" : "text-faint hover:text-dim"}`}
+          >
+            {k === "linux" ? "Linux" : `Image${bare?.imageName ? `: ${bare.imageName.split("/").pop()}` : ""}`}
+          </button>
+        ))}
+        {source === "image" && (bareStatus === "running" || bareStatus === "booting") ? (
+          <button onClick={() => stopImage()} className="ml-auto rounded px-2 py-0.5 text-bad hover:bg-bad/10">
+            Power off
+          </button>
+        ) : null}
+      </div>
       <canvas
         ref={canvas}
         tabIndex={0}
@@ -141,13 +176,22 @@ export function DisplayView({ active }: { active: boolean }) {
       />
       {!live ? (
         <div className="absolute inset-0 flex items-center justify-center text-[12px] text-faint">
-          {status === "running" ? "Waiting for the display…" : "No signal: the OS is not running."}
+          {status === "running"
+            ? "Waiting for the display…"
+            : source === "image"
+              ? "No image is running. Use Boot image in the toolbar."
+              : "No signal: the OS is not running."}
         </div>
       ) : (
         <div className="shrink-0 border-t border-line bg-panel px-3 py-1 text-[11px] text-faint">
-          {focused ? "Keyboard goes to the OS. Click elsewhere to leave." : "Click the screen to type into the OS."}
+          {focused ? "Keyboard goes to the machine. Click elsewhere to leave." : "Click the screen to type into the machine."}
         </div>
       )}
+      {source === "image" && bareLog ? (
+        <pre ref={logRef} aria-label="Serial output" className="max-h-24 shrink-0 overflow-auto border-t border-line bg-bg px-3 py-1 font-mono text-[11px] text-dim">
+          {bareLog}
+        </pre>
+      ) : null}
     </div>
   );
 }

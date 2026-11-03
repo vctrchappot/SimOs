@@ -9,7 +9,8 @@ import { scancodes } from "@/os/keyboard";
 import type { DisplayFrame } from "@/os/runtime/display";
 import { alpineProfile } from "@/os/runtime/profiles";
 import { PROJECT_TEMPLATE } from "@/os/template";
-import { makeStudio, root } from "./harness";
+import { BareMetalMachine } from "@/os/runtime/baremetal";
+import { makeStudio, nodeEnv, root } from "./harness";
 
 const osDir = resolve(root, "public/os").replace(/\\/g, "/");
 const built = existsSync(resolve(osDir, "alpine/fs.json"));
@@ -107,6 +108,49 @@ describe.skipIf(!built)("Alpine Linux with bash", () => {
     expect(studio.fs.readText("/tool.sh")).toBe("#!/bin/bash\necho made in shell\n");
     expect(studio.syncErrors).toEqual([]);
   });
+
+  it("assembles a boot sector with nasm and boots it on a bare machine", async () => {
+    const asm = [
+      "bits 16",
+      "org 0x7c00",
+      "xor ax, ax",
+      "mov ds, ax",
+      "mov si, msg",
+      ".loop: lodsb",
+      "or al, al",
+      "jz .done",
+      "mov ah, 0x0e",
+      "int 0x10",
+      "mov dx, 0x3f8",
+      "out dx, al",
+      "jmp .loop",
+      ".done: hlt",
+      "jmp .done",
+      'msg db "built with nasm", 0',
+      "times 510-($-$$) db 0",
+      "dw 0xaa55",
+      "",
+    ].join("\n");
+    studio.fs.writeFile("/boot.asm", asm, "editor");
+    await studio.settle();
+    const built = await sh("nasm -f bin boot.asm -o boot.img && ls -l boot.img", 60_000);
+    expect(built.code).toBe(0);
+    await studio["sync"]!.poll();
+    const image = studio.fs.readFile("/boot.img");
+    expect(image.length).toBe(512);
+    expect([image[510], image[511]]).toEqual([0x55, 0xaa]);
+
+    const machine = new BareMetalMachine(nodeEnv);
+    let serial = "";
+    machine.onSerial((d) => (serial += new TextDecoder().decode(d)));
+    try {
+      await machine.boot({ image, name: "/boot.img" });
+      for (let i = 0; i < 200 && !serial.includes("nasm"); i++) await new Promise((r) => setTimeout(r, 50));
+      expect(serial).toBe("built with nasm");
+    } finally {
+      await machine.shutdown();
+    }
+  }, 120_000);
 
   it("detects same-size edits made in the guest and keeps node_modules and ignored build output out of the editor", async () => {
     await sh("printf aaa > same.txt");

@@ -1,11 +1,13 @@
 "use client";
 
 import { create } from "zustand";
+import { BareMetalRuntime } from "@/os/runtime/baremetal-runtime";
 import { createBrowserRuntime } from "@/os/runtime/create-runtime";
 import { DEFAULT_NETWORK, parseNetworkConfig, type NetworkConfig } from "@/os/runtime/network";
 import { defaultProfile } from "@/os/runtime/profiles";
 import { TERMINAL_COUNT, type RuntimeStatus } from "@/os/runtime/types";
 import { Studio } from "@/os/studio";
+import { isBootImage } from "@/os/runtime/baremetal";
 import { runCommandFor } from "@/os/run-command";
 import type { SearchMatch } from "@/os/search";
 import { PROJECT_TEMPLATE } from "@/os/template";
@@ -64,6 +66,20 @@ interface StudioState {
   /** The network the running machine booted with, if any is running. */
   bootedNetwork: NetworkConfig | null;
   setNetwork(config: NetworkConfig): void;
+
+  /** The bare-metal machine for disk images you built (separate from the Linux system). */
+  bare: BareMetalRuntime | null;
+  bareStatus: RuntimeStatus;
+  bareDetail?: string;
+  /** What the machine wrote to its serial port (last ~16 KB). */
+  bareLog: string;
+  /** Which machine the Display tab shows. */
+  displaySource: "linux" | "image";
+  setDisplaySource(source: "linux" | "image"): void;
+  /** Disk images in the project that can be booted. */
+  bootImages(): string[];
+  bootImage(path: string): Promise<void>;
+  stopImage(): void;
 
   sidebar: "files" | "search";
   /** A search hit the editor should scroll to (nonce makes repeated clicks on one hit work). */
@@ -128,6 +144,26 @@ export const useStudio = create<StudioState>((set, get) => {
     error: null,
     notice: null,
     network: { ...DEFAULT_NETWORK },
+    bare: null,
+    bareStatus: "stopped",
+    bareLog: "",
+    displaySource: "linux",
+    setDisplaySource: (displaySource) => set({ displaySource }),
+    bootImages() {
+      const { studio } = get();
+      return studio ? studio.fs.list().filter((e) => e.kind === "file" && isBootImage(e.path)).map((e) => e.path) : [];
+    },
+    async bootImage(path) {
+      const { studio, bare } = get();
+      if (!studio || !bare) return;
+      flushEditors?.();
+      await studio.pull(); // an image the OS just built may not have been scanned yet
+      await studio.settle();
+      if (!studio.fs.exists(path)) return set({ error: `${path} no longer exists.` });
+      set({ bareLog: "", displaySource: "image", activeTerminal: DISPLAY_TAB });
+      bare.boot(studio.fs.readFile(path), path);
+    },
+    stopImage: () => get().bare?.shutdown(),
     bootedNetwork: null,
     terminals: [0],
     activeTerminal: 0,
@@ -210,6 +246,11 @@ export const useStudio = create<StudioState>((set, get) => {
       const network = loadNetwork();
       runtime.setNetwork(network);
       set({ network });
+      const bare = new BareMetalRuntime(() => new Worker(new URL("../os/runtime/baremetal.worker.ts", import.meta.url), { type: "module" }));
+      const decoder = new TextDecoder();
+      bare.onStatus((bareStatus, bareDetail) => set({ bareStatus, bareDetail }));
+      bare.onSerial((d) => set((s) => ({ bareLog: (s.bareLog + decoder.decode(d, { stream: true })).slice(-16384) })));
+      set({ bare });
       runtime.onStatus((status, statusDetail) => {
         set({ status, statusDetail });
         if (status === "booting") set({ bootedNetwork: get().network });

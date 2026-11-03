@@ -49,6 +49,11 @@ export class Studio {
   }
 
   /** Resolves when everything edited so far is durable and delivered to the running OS. */
+  /** Picks up files the guest changed since the last scan, without waiting for the next one. */
+  async pull(): Promise<void> {
+    if (this.sync && this.runtime.status === "running") await this.sync.poll();
+  }
+
   async settle(): Promise<void> {
     await this.sync?.idle();
     await this.persistence?.flush();

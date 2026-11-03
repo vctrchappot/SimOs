@@ -27,7 +27,7 @@ const log = (...a) => console.log("[e2e]", ...a);
 
 const browser = await chromium.launch({ channel, headless: true });
 const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
-page.on("pageerror", (e) => log("PAGE ERROR", e.message));
+page.on("pageerror", (e) => log("PAGE ERROR", e.message, (e.stack ?? "").slice(0, 600)));
 page.on("console", (m) => m.type() === "error" && log("console.error", m.text().slice(0, 200)));
 
 // Only the visible terminal tab counts (inactive tabs stay mounted but hidden).
@@ -155,6 +155,25 @@ await page.waitForTimeout(1000); // the emulated shell is slow to echo and run i
 await type("ls from-display.txt");
 await waitTerm(/^from-display.txt$/m);
 log("display shows the VGA console and takes keyboard input");
+
+// build the bootable OS from the template with nasm in the guest, then boot it on a bare PC
+await type("cd boot && make && cd ..");
+await waitTerm(/nasm -f bin boot\.asm -o boot\.img/);
+await type("ls -l boot/boot.img");
+await waitTerm(/ 512 .*boot\/boot\.img/);
+await page.getByRole("button", { name: "Boot image" }).click();
+const bootButton = page.getByRole("dialog", { name: "Boot a disk image" }).locator("div", { hasText: "/boot/boot.img" }).getByRole("button", { name: "Boot" }).last();
+await bootButton.waitFor({ timeout: 20000 });
+await bootButton.click();
+const serialLog = page.getByLabel("Serial output");
+await serialLog.getByText(/Hello from my own operating system!/).waitFor({ timeout: 60000 });
+await screen.click();
+await page.keyboard.type("abc", { delay: 50 });
+await page.waitForFunction(() => /Type something: abc/.test(document.querySelector('[aria-label="Serial output"]')?.textContent ?? ""), null, { timeout: 15000 });
+await page.screenshot({ path: ".scratch/baremetal.png" });
+await page.getByRole("button", { name: "Power off", exact: true }).last().click();
+await page.getByRole("tab", { name: "Console" }).click();
+log("bare-metal image built with nasm, booted, and typed into");
 
 // networking is off until chosen; switch on browser fetch, restart, and fetch this very page from inside the guest
 await type("echo nonet=$(grep -c simos.net /proc/cmdline)");

@@ -21,6 +21,10 @@ tcc-dev
 tcc-libs-static
 musl-dev
 
+# Bare-metal OS development: assembler and binutils (as, ld, objcopy)
+nasm
+binutils
+
 # Ideas (uncomment, then run `npm run build:os` again):
 # python3
 # vim
