@@ -130,6 +130,32 @@ await page.getByLabel("Search in files").fill("echo");
 await page.waitForTimeout(500);
 await page.screenshot({ path: ".scratch/phase3.png" });
 
+// the display: the VGA console shows a login shell, and keys typed there reach the guest
+await page.getByRole("tab", { name: "Display" }).click();
+const screen = page.getByLabel("Machine display");
+await screen.waitFor({ state: "visible", timeout: 20000 });
+await page.waitForFunction(
+  () => {
+    const c = document.querySelector('canvas[aria-label="Machine display"]');
+    if (!c || !c.width) return false;
+    const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 100 || d[i + 1] > 100 || d[i + 2] > 100) return true;
+    return false;
+  },
+  null,
+  { timeout: 30000 },
+);
+await page.screenshot({ path: ".scratch/display.png" });
+await screen.click();
+await page.keyboard.type("touch from-display.txt\n", { delay: 20 });
+await page.waitForTimeout(3000);
+await page.screenshot({ path: ".scratch/display2.png" });
+await page.getByRole("tab", { name: "Console" }).click();
+await page.waitForTimeout(1000); // the emulated shell is slow to echo and run it
+await type("ls from-display.txt");
+await waitTerm(/^from-display.txt$/m);
+log("display shows the VGA console and takes keyboard input");
+
 // networking is off until chosen; switch on browser fetch, restart, and fetch this very page from inside the guest
 await type("echo nonet=$(grep -c simos.net /proc/cmdline)");
 await waitTerm(/nonet=0/);

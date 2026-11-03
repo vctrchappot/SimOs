@@ -10,6 +10,7 @@ const post = (msg: FromWorker, transfer: Transferable[] = []) => (self as unknow
 
 let runtime: V86Runtime | null = null;
 let targets: { project: GuestFS; root: GuestFS } | null = null;
+let offDisplay: (() => void) | null = null;
 let prepared: { resolve: () => void; reject: (e: Error) => void } | null = null;
 
 async function handleFs(msg: Extract<ToWorker, { t: "fs" }>) {
@@ -32,6 +33,7 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
       runtime.onStatus((status, detail) => post({ t: "status", status, detail }));
       runtime.onOutput((data, terminal) => post({ t: "output", data, terminal }, [data.buffer]));
       runtime.onReady(() => post({ t: "ready" }));
+      offDisplay = null;
       void runtime.boot(async (project, root) => {
         targets = { project, root };
         await new Promise<void>((resolve, reject) => {
@@ -52,6 +54,21 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
       break;
     case "resize":
       runtime?.resize(msg.cols, msg.rows, msg.terminal);
+      break;
+    case "display-watch":
+      offDisplay?.();
+      offDisplay = null;
+      if (msg.on && runtime) {
+        offDisplay = runtime.onDisplay((frame) =>
+          post({ t: "display", frame }, frame.kind === "graphic" ? frame.rects.map((r) => r.data.buffer) : []),
+        );
+      }
+      break;
+    case "keys":
+      runtime?.sendKeys(msg.codes);
+      break;
+    case "mouse":
+      runtime?.sendMouse(msg.dx, msg.dy, msg.buttons);
       break;
     case "fs":
       void handleFs(msg);

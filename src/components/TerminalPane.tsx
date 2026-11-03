@@ -5,7 +5,8 @@ import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { defaultProfile } from "@/os/runtime/profiles";
 import { TERMINAL_COUNT } from "@/os/runtime/types";
-import { useStudio } from "@/store/studio";
+import { DisplayView } from "./DisplayView";
+import { DISPLAY_TAB, useStudio } from "@/store/studio";
 
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
@@ -147,11 +148,23 @@ export function TerminalPane() {
         >
           +
         </button>
+        <div
+          role="tab"
+          aria-selected={activeTerminal === DISPLAY_TAB}
+          onClick={() => setActiveTerminal(DISPLAY_TAB)}
+          title="The machine's screen (VGA console, keyboard and mouse)"
+          className={`ml-auto flex cursor-pointer items-center border-l border-line px-3 ${
+            activeTerminal === DISPLAY_TAB ? "bg-bg text-fg shadow-[inset_0_-1px_0_var(--color-accent)]" : "bg-panel text-faint hover:text-dim"
+          }`}
+        >
+          Display
+        </div>
       </div>
       <div className="relative min-h-0 flex-1">
         {terminals.map((t) => (
           <TerminalView key={t} index={t} active={t === activeTerminal} />
         ))}
+        <DisplayView active={activeTerminal === DISPLAY_TAB} />
       </div>
     </div>
   );

@@ -5,6 +5,8 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { scancodes } from "@/os/keyboard";
+import type { DisplayFrame } from "@/os/runtime/display";
 import { alpineProfile } from "@/os/runtime/profiles";
 import { PROJECT_TEMPLATE } from "@/os/template";
 import { makeStudio, root } from "./harness";
@@ -37,6 +39,36 @@ describe.skipIf(!built)("Alpine Linux with bash", () => {
   it("does not configure a network unless networking was switched on", async () => {
     expect(m.bootLog()).not.toContain("[simos] network");
   });
+
+  it("shows a login shell on the display and takes keyboard input from it", async () => {
+    let frame: DisplayFrame | null = null;
+    const off = m.runtime.onDisplay((f) => f.kind === "text" && (frame = f));
+    const screen = () => {
+      const f = frame as DisplayFrame | null;
+      if (!f || f.kind !== "text") return "";
+      const rows: string[] = [];
+      for (let r = 0; r < f.rows; r++) rows.push(String.fromCharCode(...f.chars.slice(r * f.cols, (r + 1) * f.cols)).trimEnd());
+      return rows.join("\n");
+    };
+    const waitScreen = async (re: RegExp) => {
+      for (let i = 0; i < 400; i++) {
+        if (re.test(screen())) return;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      throw new Error(`display never showed ${re}:\n${screen()}`);
+    };
+    try {
+      await waitScreen(/root@[\w-]+:[^\n]*[#$]/);
+      const press = (code: string) => {
+        m.runtime.sendKeys(scancodes(code, true)!);
+        m.runtime.sendKeys(scancodes(code, false)!);
+      };
+      for (const c of ["KeyE", "KeyC", "KeyH", "KeyO", "Space", "KeyH", "KeyI", "Digit4", "Digit2", "Enter"]) press(c);
+      await waitScreen(/^hi42$/m);
+    } finally {
+      off();
+    }
+  }, 60_000);
 
   it("has the template project, with executable scripts", async () => {
     const { out } = await sh("ls");

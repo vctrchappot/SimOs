@@ -1,3 +1,4 @@
+import type { DisplayFrame } from "./display";
 import type { NetworkConfig } from "./network";
 import { OutputHistory } from "./output-history";
 import { endShell } from "./terminal-control";
@@ -44,6 +45,7 @@ export class WorkerRuntime implements OSRuntime {
   private outputCbs = new Set<(d: Uint8Array, terminal: number) => void>();
   private logs = new OutputHistory(TERMINAL_COUNT);
   private readyCbs = new Set<() => void>();
+  private displayCbs = new Set<(f: DisplayFrame) => void>();
   private sizes: Array<{ cols: number; rows: number } | undefined> = [];
   private nextCall = 1;
   private calls = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -61,6 +63,21 @@ export class WorkerRuntime implements OSRuntime {
     this.outputCbs.add(cb);
     return () => void this.outputCbs.delete(cb);
   }
+  onDisplay(cb: (f: DisplayFrame) => void) {
+    this.displayCbs.add(cb);
+    if (this.displayCbs.size === 1 || this.worker) this.send({ t: "display-watch", on: true });
+    return () => {
+      this.displayCbs.delete(cb);
+      if (!this.displayCbs.size) this.send({ t: "display-watch", on: false });
+    };
+  }
+  sendKeys(codes: number[]): void {
+    if (this.status === "running") this.send({ t: "keys", codes });
+  }
+  sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean]): void {
+    if (this.status === "running") this.send({ t: "mouse", dx, dy, buttons });
+  }
+
   history(terminal: number) {
     return this.logs.get(terminal);
   }
@@ -126,6 +143,9 @@ export class WorkerRuntime implements OSRuntime {
           this.logs.push(msg.terminal, msg.data);
           for (const cb of [...this.outputCbs]) cb(msg.data, msg.terminal);
           break;
+        case "display":
+          for (const cb of [...this.displayCbs]) cb(msg.frame);
+          break;
         case "ready":
           for (const cb of [...this.readyCbs]) cb();
           break;
@@ -156,6 +176,7 @@ export class WorkerRuntime implements OSRuntime {
     };
 
     this.send({ t: "boot", profile: this.profile, sizes: this.sizes });
+    if (this.displayCbs.size) this.send({ t: "display-watch", on: true });
     await settled;
   }
 

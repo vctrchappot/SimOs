@@ -11,6 +11,9 @@ import type { SearchMatch } from "@/os/search";
 import { PROJECT_TEMPLATE } from "@/os/template";
 import { IdbProjectStore } from "@/os/vfs/persistence";
 
+/** Pseudo terminal index of the Display tab. */
+export const DISPLAY_TAB = -1;
+
 const TABS_KEY = "simos.tabs.v1";
 const NETWORK_KEY = "simos.network.v1";
 

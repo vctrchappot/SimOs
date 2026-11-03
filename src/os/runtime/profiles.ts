@@ -12,8 +12,9 @@ function studioProfileScript(projectDir: string): string {
 if [ -n "$PS1" ] && [ -z "$SIMOS_INIT" ]; then
   export SIMOS_INIT=1
   export PROJECT=${projectDir}
-  __simos_tty=$(tty 2>/dev/null); __simos_tty="\${__simos_tty##*S}"
-  case "$__simos_tty" in [0-9]) ;; *) __simos_tty=0 ;; esac
+  # ttyS0-3 are the studio terminals; anything else (tty1 on the display) has no size file.
+  __simos_tty=$(tty 2>/dev/null)
+  case "$__simos_tty" in /dev/ttyS[0-3]) __simos_tty="\${__simos_tty##*S}" ;; *) __simos_tty=v ;; esac
   # Extra terminals start from a clean screen (terminal 0 keeps the boot log above it).
   [ "$__simos_tty" != 0 ] && printf '\\033c'
   bind 'set enable-bracketed-paste off' 2>/dev/null

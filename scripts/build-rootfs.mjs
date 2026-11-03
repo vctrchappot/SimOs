@@ -154,6 +154,8 @@ put("/etc/issue", "");
 put("/etc/inittab", [
   "::sysinit:/etc/simos-init",
   ...[0, 1, 2, 3].map((n) => `ttyS${n}::respawn:/sbin/getty -n -l /etc/simos-login 115200 ttyS${n} vt100`),
+  // The display (VGA text console) gets its own login shell.
+  "tty1::respawn:/sbin/getty -n -l /etc/simos-login 38400 tty1 linux",
   "::ctrlaltdel:/sbin/reboot",
   "::shutdown:/bin/sync",
   "",
@@ -163,6 +165,7 @@ put(
   `#!/bin/sh
 # Auto-login: a bash login shell for root on the serial console.
 export HOME=/root USER=root LOGNAME=root SHELL=/bin/bash TERM=xterm-256color
+case "$(tty)" in /dev/tty[0-9]*) export TERM=linux ;; esac
 cd /root
 exec /bin/bash -l
 `,

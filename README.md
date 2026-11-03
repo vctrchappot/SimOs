@@ -23,6 +23,9 @@ Nothing in the terminal is simulated: commands are executed by the guest's own `
 - **Keyboard-driven file tree:** arrows, Enter, F2 (rename), Delete (press twice to confirm).
 - **Optional networking** (off by default, toolbar *Network*): the OS gets a real virtio network card, DHCP and DNS.
   Choose *Browser fetch* (plain HTTP via your browser) or a *Wisp relay* you run yourself (TCP/DNS).
+- **A real display.** The *Display* tab shows the machine's VGA screen, with a login shell on `tty1`, and sends your
+  keyboard (and mouse, in graphics modes) to the guest's PS/2 devices. Text and pixel modes both work, so a
+  bare-metal OS or a framebuffer program has somewhere to draw.
 - Power on / Power off / Restart / Reset the machine; the project survives all of them and page reloads.
 
 ## Quick start
@@ -74,6 +77,9 @@ Not simulated but constrained by the platform, so know the limits:
   run your own and never use one you don't trust. Neither supports `apk add` out of the box (Alpine's mirror
   sends no CORS headers; HTTPS needs the relay). The image is fixed at build time; add packages by
   adding them to `scripts/packages.txt` and running `npm run build:os` again.
+* **The display follows the physical keys** you press and the guest uses a US layout (`loadkmap` can change
+  that). The bundled kernel has no framebuffer or DRM driver, so Linux itself only draws the text console;
+  graphics need a kernel with `vesafb`/`bochs-drm` or your own bootable system.
 * **32-bit x86 (i686)** guest, 256 MB RAM.
 * **Persistence covers the project directory** (`~/project`), not the rest of the OS. Installing
   or changing files outside `~/project` is lost on Stop/Restart. This is intentional: the OS image
@@ -148,12 +154,16 @@ the OS image by `npm run build:os`), so the studio works offline after the first
 
 Done: Phase 1 (editable OS overlay and boot services, Run file, visible sync errors and conflict notices),
 Phase 2 (ignore rules, cheaper change detection, emulator in a Web Worker, CI) and Phase 3 (terminals,
-project search, zip import/export, keyboard navigation, editable package list) and optional guest networking.
+project search, zip import/export, keyboard navigation, editable package list), optional guest networking
+and the display.
 
 Deliberately not done: *fast resume* from a saved VM state. Boot takes about 7 s, while a saved state
 would be hundreds of megabytes per project and tied to one exact image version.
 
-Next: a display pane (framebuffer and input) for graphical systems.
+Phase 4 added the display pane (VGA text and graphics, keyboard, mouse).
+
+Next: a profile that boots a custom kernel/bootable image (to develop bare-metal OSes), and a kernel with
+framebuffer support for a desktop.
 
 ## Third-party software
 

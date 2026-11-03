@@ -1,3 +1,4 @@
+import { DisplayAdapter, type DisplayFrame } from "./display";
 import { networkDevice, type NetworkConfig } from "./network";
 import { OutputHistory } from "./output-history";
 import { endShell } from "./terminal-control";
@@ -11,6 +12,12 @@ interface Emulator {
   run(): Promise<void>;
   destroy(): Promise<void>;
   serial_send_bytes(serial: number, data: Uint8Array): void;
+  bus: { send(name: string, data: unknown): void };
+}
+
+/** The emulated video card, reached through v86's internals (it has no public hook for custom screens). */
+interface VgaHolder {
+  v86?: { cpu?: { devices?: { vga?: { screen: unknown; screen_fill_buffer(): void } } } };
 }
 
 export interface V86Environment {
@@ -44,11 +51,22 @@ export class V86Runtime implements OSRuntime {
   private tail = "";
   private generation = 0;
   private sizes: Array<{ cols: number; rows: number } | undefined> = [];
+  private display = this.newDisplay();
+  private displayCbs = new Set<(f: DisplayFrame) => void>();
+  private displayTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private profile: OSProfile,
     private env: V86Environment,
   ) {}
+
+  private newDisplay() {
+    const display = new DisplayAdapter();
+    display.onFrame = (frame) => {
+      for (const cb of [...this.displayCbs]) cb(frame);
+    };
+    return display;
+  }
 
   onStatus(cb: (s: RuntimeStatus, detail?: string) => void) {
     this.statusCbs.add(cb);
@@ -62,6 +80,42 @@ export class V86Runtime implements OSRuntime {
     this.readyCbs.add(cb);
     return () => void this.readyCbs.delete(cb);
   }
+  onDisplay(cb: (f: DisplayFrame) => void) {
+    this.displayCbs.add(cb);
+    this.display.invalidate(); // the new viewer gets the whole picture
+    this.startDisplayTimer();
+    return () => {
+      this.displayCbs.delete(cb);
+      if (!this.displayCbs.size) this.stopDisplayTimer();
+    };
+  }
+
+  /** Paints the guest's video memory into the adapter ~30x a second, but only while someone watches. */
+  private startDisplayTimer() {
+    if (this.displayTimer || !this.emulator || !this.displayCbs.size) return;
+    this.displayTimer = setInterval(() => {
+      const vga = (this.emulator as unknown as VgaHolder | null)?.v86?.cpu?.devices?.vga;
+      vga?.screen_fill_buffer();
+      this.display.flush();
+    }, 33);
+  }
+  private stopDisplayTimer() {
+    if (this.displayTimer) clearInterval(this.displayTimer);
+    this.displayTimer = null;
+  }
+
+  /** Scancodes (set 1, as a PC keyboard sends them) for the guest's PS/2 keyboard. */
+  sendKeys(codes: number[]): void {
+    if (!this.emulator || this.status !== "running") return;
+    for (const code of codes) this.emulator.bus.send("keyboard-code", code);
+  }
+
+  sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean]): void {
+    if (!this.emulator || this.status !== "running") return;
+    if (dx || dy) this.emulator.bus.send("mouse-delta", [dx, -dy]);
+    this.emulator.bus.send("mouse-click", buttons);
+  }
+
   history(terminal: number) {
     return this.logs.get(terminal);
   }
@@ -114,6 +168,12 @@ export class V86Runtime implements OSRuntime {
       this.emulator = emulator;
       await new Promise<void>((resolve) => emulator.add_listener("emulator-ready", () => resolve()));
       if (gen !== this.generation) return void (await emulator.destroy());
+
+      // Route the emulated video card into our DOM-free display (before the machine starts).
+      const vga = (emulator as unknown as VgaHolder).v86?.cpu?.devices?.vga;
+      this.display = this.newDisplay();
+      if (vga) vga.screen = this.display;
+      this.startDisplayTimer();
 
       for (const t of terminals) {
         emulator.add_listener(`serial${t}-output-byte`, ((byte: number) => this.onSerialByte(t, byte)) as (a: never) => void);
@@ -186,6 +246,7 @@ export class V86Runtime implements OSRuntime {
   }
 
   private async teardown() {
+    this.stopDisplayTimer();
     this.flushOutput();
     const emulator = this.emulator;
     this.emulator = null;
