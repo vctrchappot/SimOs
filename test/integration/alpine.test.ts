@@ -34,6 +34,10 @@ describe.skipIf(!built)("Alpine Linux with bash", () => {
     expect((await sh("cat /etc/alpine-release; uname -sm; ps -o pid,args | head -3")).out).toMatch(/Linux i686[\s\S]*1 .*init/);
   });
 
+  it("does not configure a network unless networking was switched on", async () => {
+    expect(m.bootLog()).not.toContain("[simos] network");
+  });
+
   it("has the template project, with executable scripts", async () => {
     const { out } = await sh("ls");
     for (const f of ["README.md", "hello.sh", "hello.c", "Makefile", "scripts"]) expect(out).toContain(f);

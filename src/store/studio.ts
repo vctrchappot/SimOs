@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { createBrowserRuntime } from "@/os/runtime/create-runtime";
+import { DEFAULT_NETWORK, parseNetworkConfig, type NetworkConfig } from "@/os/runtime/network";
 import { defaultProfile } from "@/os/runtime/profiles";
 import { TERMINAL_COUNT, type RuntimeStatus } from "@/os/runtime/types";
 import { Studio } from "@/os/studio";
@@ -11,6 +12,15 @@ import { PROJECT_TEMPLATE } from "@/os/template";
 import { IdbProjectStore } from "@/os/vfs/persistence";
 
 const TABS_KEY = "simos.tabs.v1";
+const NETWORK_KEY = "simos.network.v1";
+
+function loadNetwork(): NetworkConfig {
+  try {
+    return parseNetworkConfig(localStorage.getItem(NETWORK_KEY));
+  } catch {
+    return { ...DEFAULT_NETWORK };
+  }
+}
 
 function loadTabs(): { open: string[]; active: string | null } {
   try {
@@ -45,6 +55,12 @@ interface StudioState {
   /** Open terminal tabs (each is a serial console of the guest, 0 is the system console). */
   terminals: number[];
   activeTerminal: number;
+
+  /** Network for the next boot (off by default). */
+  network: NetworkConfig;
+  /** The network the running machine booted with, if any is running. */
+  bootedNetwork: NetworkConfig | null;
+  setNetwork(config: NetworkConfig): void;
 
   sidebar: "files" | "search";
   /** A search hit the editor should scroll to (nonce makes repeated clicks on one hit work). */
@@ -108,6 +124,8 @@ export const useStudio = create<StudioState>((set, get) => {
     activePath: null,
     error: null,
     notice: null,
+    network: { ...DEFAULT_NETWORK },
+    bootedNetwork: null,
     terminals: [0],
     activeTerminal: 0,
     sidebar: "files",
@@ -161,6 +179,16 @@ export const useStudio = create<StudioState>((set, get) => {
       studio.runtime.sendInput(CLEAR_LINE + command + "\n", 0);
     },
 
+    setNetwork(config) {
+      set({ network: config });
+      try {
+        localStorage.setItem(NETWORK_KEY, JSON.stringify(config));
+      } catch {
+        /* storage unavailable */
+      }
+      get().studio?.runtime.setNetwork(config);
+    },
+
     async init() {
       if (initStarted) return;
       initStarted = true;
@@ -176,7 +204,14 @@ export const useStudio = create<StudioState>((set, get) => {
           },
         },
       });
-      runtime.onStatus((status, statusDetail) => set({ status, statusDetail }));
+      const network = loadNetwork();
+      runtime.setNetwork(network);
+      set({ network });
+      runtime.onStatus((status, statusDetail) => {
+        set({ status, statusDetail });
+        if (status === "booting") set({ bootedNetwork: get().network });
+        if (status === "stopped" || status === "error") set({ bootedNetwork: null });
+      });
       await studio.init();
       studio.onChange(() => set((s) => ({ rev: s.rev + 1 })));
 

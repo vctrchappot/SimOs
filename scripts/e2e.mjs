@@ -130,6 +130,20 @@ await page.getByLabel("Search in files").fill("echo");
 await page.waitForTimeout(500);
 await page.screenshot({ path: ".scratch/phase3.png" });
 
+// networking is off until chosen; switch on browser fetch, restart, and fetch this very page from inside the guest
+await type("echo nonet=$(grep -c simos.net /proc/cmdline)");
+await waitTerm(/nonet=0/);
+await page.getByRole("button", { name: /^Network: Off/ }).click();
+await page.getByRole("radio", { name: /Browser fetch/ }).check();
+await page.keyboard.press("Escape");
+await page.getByRole("button", { name: "Restart" }).click();
+await waitTerm(/\[simos\] network: eth0 192\./);
+await waitTerm(/Your project is/);
+const port = new URL(url).port;
+await type(`wget -qO- http://${port}.external/ | head -c 300 | grep -o -i '<html'`);
+await waitTerm(/<html/i);
+log("guest networking ok (DHCP + HTTP through the browser)");
+
 // persistence: reload the page, a fresh machine boots from the stored project
 await page.waitForTimeout(600);
 await page.reload();

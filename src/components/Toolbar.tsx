@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { runCommandFor } from "@/os/run-command";
 import { defaultProfile } from "@/os/runtime/profiles";
 import type { RuntimeStatus } from "@/os/runtime/types";
+import { NetworkMenu } from "./NetworkMenu";
 import { useStudio } from "@/store/studio";
 
 const STATUS: Record<RuntimeStatus, { label: string; dot: string }> = {
@@ -83,6 +84,8 @@ ${command}` : "Open a .sh, .c or Makefile to run it"}
         >
           Run file
         </Button>
+        <span className="mx-1 h-4 w-px bg-line" />
+        <NetworkMenu />
         <span className="mx-1 h-4 w-px bg-line" />
         <Button onClick={() => void run()} disabled={!ready || !idle} title="Boot the OS">
           Power on

@@ -1,3 +1,4 @@
+import { networkDevice, type NetworkConfig } from "./network";
 import { OutputHistory } from "./output-history";
 import { endShell } from "./terminal-control";
 import { TERMINAL_COUNT, type GuestFS, type OSProfile, type OSRuntime, type RuntimeStatus } from "./types";
@@ -45,7 +46,7 @@ export class V86Runtime implements OSRuntime {
   private sizes: Array<{ cols: number; rows: number } | undefined> = [];
 
   constructor(
-    readonly profile: OSProfile,
+    private profile: OSProfile,
     private env: V86Environment,
   ) {}
 
@@ -63,6 +64,10 @@ export class V86Runtime implements OSRuntime {
   }
   history(terminal: number) {
     return this.logs.get(terminal);
+  }
+
+  setNetwork(config: NetworkConfig) {
+    this.profile = { ...this.profile, network: config };
   }
 
   private setStatus(s: RuntimeStatus, detail?: string) {
@@ -99,6 +104,11 @@ export class V86Runtime implements OSRuntime {
         options.filesystem = {};
       }
       options.bzimage = { url: assets.bzimage };
+      const net = networkDevice(this.profile.network);
+      if (net) {
+        options.net_device = net;
+        options.cmdline = `${this.profile.cmdline} simos.net=1`; // tells init to bring eth0 up
+      }
 
       const emulator = new V86(options);
       this.emulator = emulator;

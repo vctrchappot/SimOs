@@ -1,3 +1,4 @@
+import type { NetworkConfig } from "./network";
 import { OutputHistory } from "./output-history";
 import { endShell } from "./terminal-control";
 import { TERMINAL_COUNT, type GuestFS, type GuestStat, type OSProfile, type OSRuntime, type RuntimeStatus } from "./types";
@@ -48,7 +49,7 @@ export class WorkerRuntime implements OSRuntime {
   private calls = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
   constructor(
-    readonly profile: OSProfile,
+    private profile: OSProfile,
     private createWorker: () => Worker,
   ) {}
 
@@ -66,6 +67,10 @@ export class WorkerRuntime implements OSRuntime {
   onReady(cb: () => void) {
     this.readyCbs.add(cb);
     return () => void this.readyCbs.delete(cb);
+  }
+
+  setNetwork(config: NetworkConfig) {
+    this.profile = { ...this.profile, network: config };
   }
 
   private setStatus(s: RuntimeStatus, detail?: string) {

@@ -185,6 +185,16 @@ mountpoint -q /dev/pts || mount -t devpts devpts /dev/pts
 mountpoint -q /run || mount -t tmpfs tmpfs /run
 mountpoint -q /tmp || mount -t tmpfs tmpfs /tmp
 hostname -F /etc/hostname
+ip link set lo up
+# v86 always has a network card; it is only wired to something when networking is switched on.
+if grep -q simos.net=1 /proc/cmdline; then
+  ip link set eth0 up
+  if udhcpc -i eth0 -n -q -t 4 -T 1 >/dev/null 2>&1; then
+    echo "[simos] network: eth0 $(ip addr show eth0 | sed -n 's/.*inet \\([0-9.]*\\).*/\\1/p')"
+  else
+    echo "[simos] network: no DHCP answer on eth0"
+  fi
+fi
 mkdir -p /root/project
 # User services: every file in /etc/rc.d runs once, in name order (executables run, others are sourced).
 # They come from the project's system/etc/rc.d folder. Background long-running work with "&".

@@ -1,4 +1,5 @@
 /** Contracts between the studio and whatever machine is running the OS. */
+import type { NetworkConfig } from "./network";
 
 /** Serial consoles the machine offers (ttyS0..ttyS3). Each runs its own login shell. */
 export const TERMINAL_COUNT = 4;
@@ -32,6 +33,8 @@ export interface GuestFS {
 }
 
 export interface OSRuntime {
+  /** Chooses the network for the next boot; a running machine keeps the one it started with. */
+  setNetwork(config: NetworkConfig): void;
   readonly status: RuntimeStatus;
   /** Guest filesystem view; available only while running. */
   readonly guestFs: GuestFS | null;
@@ -83,4 +86,6 @@ export interface OSProfile {
   bootFiles: Record<string, { content: string; mode?: number }>;
   /** Text printed by the guest once the shell is ready. */
   readyMarker: string;
+  /** Network card for the next boot. Absent or mode "off": the guest has no network. */
+  network?: NetworkConfig;
 }

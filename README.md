@@ -21,6 +21,8 @@ Nothing in the terminal is simulated: commands are executed by the guest's own `
 - **Search in all files** (Ctrl+Shift+F), with case and regex options; a hit opens the file at that line.
 - **Import and export the project as a .zip** (no dependencies; unsafe paths and zip bombs are rejected).
 - **Keyboard-driven file tree:** arrows, Enter, F2 (rename), Delete (press twice to confirm).
+- **Optional networking** (off by default, toolbar *Network*): the OS gets a real virtio network card, DHCP and DNS.
+  Choose *Browser fetch* (plain HTTP via your browser) or a *Wisp relay* you run yourself (TCP/DNS).
 - Power on / Power off / Restart / Reset the machine; the project survives all of them and page reloads.
 
 ## Quick start
@@ -66,7 +68,11 @@ scripts, the compiler, the filesystem semantics inside the guest.
 Not simulated but constrained by the platform, so know the limits:
 
 * **x86 emulation is slow** (roughly 20-50x slower than native). Compiling large programs takes a while.
-* **No networking** (no `apk add`, no `curl`). The image is fixed at build time; add packages by
+* **Networking is opt-in and limited.** *Browser fetch* carries only plain HTTP on port 80 (no HTTPS, ping,
+  UDP or other TCP), is subject to the browser's CORS rules, and reaches this computer via
+  `http://<port>.external/`. A *Wisp relay* gives TCP and DNS, but the relay operator sees all guest traffic:
+  run your own and never use one you don't trust. Neither supports `apk add` out of the box (Alpine's mirror
+  sends no CORS headers; HTTPS needs the relay). The image is fixed at build time; add packages by
   adding them to `scripts/packages.txt` and running `npm run build:os` again.
 * **32-bit x86 (i686)** guest, 256 MB RAM.
 * **Persistence covers the project directory** (`~/project`), not the rest of the OS. Installing
@@ -130,8 +136,8 @@ works unchanged. In a heavy-loop test the worst frame gap dropped from 50 ms to 
 Edge); the gain is modest because the emulator already yields often. Add `?inline` to the page URL to
 run it on the main thread instead, and browsers without workers fall back automatically.
 
-Isolation: user code runs only inside the emulated machine (a WASM sandbox with no network and no
-access to the host page); the app talks to it solely through the console and the 9p tree.
+Isolation: user code runs only inside the emulated machine (a WASM sandbox that has no network unless you
+switch it on, and no access to the host page); the app talks to it solely through the console and the 9p tree.
 
 ## Configuration
 
@@ -142,12 +148,12 @@ the OS image by `npm run build:os`), so the studio works offline after the first
 
 Done: Phase 1 (editable OS overlay and boot services, Run file, visible sync errors and conflict notices),
 Phase 2 (ignore rules, cheaper change detection, emulator in a Web Worker, CI) and Phase 3 (terminals,
-project search, zip import/export, keyboard navigation, editable package list).
+project search, zip import/export, keyboard navigation, editable package list) and optional guest networking.
 
 Deliberately not done: *fast resume* from a saved VM state. Boot takes about 7 s, while a saved state
 would be hundreds of megabytes per project and tied to one exact image version.
 
-Next: a display pane (framebuffer and input) for graphical systems, then optional networking.
+Next: a display pane (framebuffer and input) for graphical systems.
 
 ## Third-party software
 
