@@ -26,6 +26,10 @@ Nothing in the terminal is simulated: commands are executed by the guest's own `
 - **Boot your own operating system.** *Boot image* starts a bare PC (BIOS, VGA, keyboard, serial port, no Linux)
   from a disk image in your project. The template has a 512-byte OS in `boot/boot.asm`; build it with `nasm`
   in the Linux terminal (`cd boot && make`) and boot it, with a serial log below the screen.
+- **Debug your OS.** With an image running, the Display tab shows registers (with flags and real/protected mode),
+  a live memory dump (or one that follows EIP), *Pause*/*Continue*, and address breakpoints. The emulator has
+  no single-step or breakpoint hook, so a breakpoint temporarily patches `jmp $` over the instruction, which
+  works for code that runs per event (a key press, an interrupt); see `src/os/runtime/debugger.ts` for the limits.
 - **A real display.** The *Display* tab shows the machine's VGA screen, with a login shell on `tty1`, and sends your
   keyboard (and mouse, in graphics modes) to the guest's PS/2 devices. Text and pixel modes both work, so a
   bare-metal OS or a framebuffer program has somewhere to draw.
@@ -158,7 +162,7 @@ the OS image by `npm run build:os`), so the studio works offline after the first
 Done: Phase 1 (editable OS overlay and boot services, Run file, visible sync errors and conflict notices),
 Phase 2 (ignore rules, cheaper change detection, emulator in a Web Worker, CI) and Phase 3 (terminals,
 project search, zip import/export, keyboard navigation, editable package list), optional guest networking
-the display and bare-metal boot of your own images.
+the display bare-metal boot of your own images and a debugger for them.
 
 Deliberately not done: *fast resume* from a saved VM state. Boot takes about 7 s, while a saved state
 would be hundreds of megabytes per project and tied to one exact image version.
@@ -167,8 +171,10 @@ Phase 4 added the display pane (VGA text and graphics, keyboard, mouse).
 
 Phase 5 added bare-metal boot of your own disk images (nasm and binutils are in the Linux image).
 
-Next: a kernel with framebuffer support for a desktop, and debugging aids for bare-metal work (register and
-memory view, breakpoints).
+Phase 6 added the bare-metal debugger.
+
+Next: a kernel with framebuffer support for a desktop; true single-stepping and a disassembler for the
+debugger (needs an x86 decoder).
 
 ## Third-party software
 

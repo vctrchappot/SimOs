@@ -1,4 +1,5 @@
 import type { BareFromWorker, BareToWorker } from "./baremetal.worker";
+import type { DebugSnapshot } from "./debugger";
 import type { DisplayFrame } from "./display";
 import type { RuntimeStatus } from "./types";
 
@@ -12,6 +13,10 @@ export class BareMetalRuntime {
   private statusCbs = new Set<(s: RuntimeStatus, detail?: string) => void>();
   private displayCbs = new Set<(f: DisplayFrame) => void>();
   private serialCbs = new Set<(d: Uint8Array) => void>();
+  private debugCbs = new Set<(s: { paused: boolean; hit: number | null }) => void>();
+  private breakpoints: number[] = [];
+  private inspects = new Map<number, (s: DebugSnapshot | null) => void>();
+  private nextInspect = 1;
 
   constructor(private createWorker: () => Worker) {}
 
@@ -32,6 +37,35 @@ export class BareMetalRuntime {
     this.serialCbs.add(cb);
     return () => void this.serialCbs.delete(cb);
   }
+  onDebugState(cb: (s: { paused: boolean; hit: number | null }) => void) {
+    this.debugCbs.add(cb);
+    return () => void this.debugCbs.delete(cb);
+  }
+
+  pause() {
+    if (this.status === "running") this.send({ t: "debug", op: "pause" });
+  }
+  resume() {
+    if (this.status === "running") this.send({ t: "debug", op: "resume" });
+  }
+  /** Flat addresses to break at. Remembered across boots; those in the boot sector work from the first instruction. */
+  setBreakpoints(addresses: number[]) {
+    this.breakpoints = [...addresses];
+    this.send({ t: "breakpoints", addresses });
+  }
+  /** Registers, memory window and breakpoint state of the running machine (null if none is running). */
+  inspect(memory?: { addr: number; length: number }): Promise<DebugSnapshot | null> {
+    if (this.status !== "running" || !this.worker) return Promise.resolve(null);
+    const id = this.nextInspect++;
+    return new Promise((resolve) => {
+      this.inspects.set(id, resolve);
+      this.send({ t: "inspect", id, memory });
+      setTimeout(() => {
+        if (this.inspects.delete(id)) resolve(null);
+      }, 2000);
+    });
+  }
+
   onDisplay(cb: (f: DisplayFrame) => void) {
     this.displayCbs.add(cb);
     if (this.displayCbs.size === 1 || this.worker) this.send({ t: "display-watch", on: true });
@@ -61,8 +95,14 @@ export class BareMetalRuntime {
         if (msg.status === "stopped") return; // shutdown() owns that transition
         this.setStatus(msg.status, msg.detail);
         if (msg.status === "error") this.dispose();
+        if (msg.status === "running" && this.breakpoints.length) this.send({ t: "breakpoints", addresses: this.breakpoints });
       } else if (msg.t === "display") for (const cb of [...this.displayCbs]) cb(msg.frame);
-      else for (const cb of [...this.serialCbs]) cb(msg.data);
+      else if (msg.t === "serial") for (const cb of [...this.serialCbs]) cb(msg.data);
+      else if (msg.t === "debug-state") for (const cb of [...this.debugCbs]) cb({ paused: msg.paused, hit: msg.hit });
+      else {
+        this.inspects.get(msg.id)?.(msg.snapshot);
+        this.inspects.delete(msg.id);
+      }
     };
     worker.onerror = (ev) => {
       if (this.worker !== worker) return;
@@ -71,7 +111,7 @@ export class BareMetalRuntime {
     };
     if (this.displayCbs.size) this.send({ t: "display-watch", on: true });
     const copy = image.slice(); // the caller keeps its bytes
-    this.send({ t: "boot", image: copy, name, memoryMB }, [copy.buffer]);
+    this.send({ t: "boot", image: copy, name, memoryMB, breakpoints: this.breakpoints }, [copy.buffer]);
   }
 
   shutdown(): void {
@@ -81,6 +121,9 @@ export class BareMetalRuntime {
   }
 
   private dispose() {
+    for (const resolve of this.inspects.values()) resolve(null);
+    this.inspects.clear();
+    for (const cb of [...this.debugCbs]) cb({ paused: false, hit: null });
     this.worker?.terminate();
     this.worker = null;
   }

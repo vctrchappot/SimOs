@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { scancodes } from "@/os/keyboard";
 import type { DisplayFrame } from "@/os/runtime/display";
+import { DebugPanel } from "./DebugPanel";
 import { useStudio } from "@/store/studio";
 
 /** Code page 437, the character set of the PC text console, as Unicode. */
@@ -187,6 +188,7 @@ export function DisplayView({ active }: { active: boolean }) {
           {focused ? "Keyboard goes to the machine. Click elsewhere to leave." : "Click the screen to type into the machine."}
         </div>
       )}
+      {source === "image" ? <DebugPanel /> : null}
       {source === "image" && bareLog ? (
         <pre ref={logRef} aria-label="Serial output" className="max-h-24 shrink-0 overflow-auto border-t border-line bg-bg px-3 py-1 font-mono text-[11px] text-dim">
           {bareLog}

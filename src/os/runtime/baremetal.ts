@@ -2,11 +2,18 @@
  * A bare PC: no Linux, no filesystem share, just BIOS, VGA, keyboard, mouse, a serial port and one
  * disk image that you built. This is where a home-made operating system boots.
  */
+import { Breakpoints, readRegisters, type CpuLike, type DebugSnapshot } from "./debugger";
 import { DisplayAdapter, type DisplayFrame } from "./display";
 import type { RuntimeStatus } from "./types";
 import type { V86Environment } from "./v86-runtime";
 
 export type DriveKind = "cdrom" | "fda" | "hda";
+
+/** A released breakpoint re-arms after this many 25 ms ticks (there is no single-step to do it sooner). */
+const REARM_TICKS = 6;
+
+/** Where the BIOS loads the boot sector. */
+export const BOOT_ADDRESS = 0x7c00;
 
 const FLOPPY_SIZES = [160, 180, 320, 360, 720, 1200, 1440, 2880].map((kb) => kb * 1024);
 
@@ -47,7 +54,12 @@ interface Emulator {
   bus: { send(name: string, data: unknown): void };
 }
 interface VgaHolder {
-  v86?: { cpu?: { devices?: { vga?: { screen: unknown; screen_fill_buffer(): void } } } };
+  v86?: { cpu?: CpuLike & { devices?: { vga?: { screen: unknown; screen_fill_buffer(): void } } } };
+}
+
+export interface DebugState {
+  paused: boolean;
+  hit: number | null;
 }
 
 export interface BareMetalBoot {
@@ -55,6 +67,11 @@ export interface BareMetalBoot {
   /** File name, used to pick the drive type. */
   name: string;
   memoryMB?: number;
+  /**
+   * Breakpoints (flat addresses). Those inside the boot sector (0x7C00-0x7DFD) are patched into the image itself, so
+   * the machine stops even on the very first instructions, before anything could set a breakpoint in memory.
+   */
+  breakpoints?: number[];
 }
 
 export class BareMetalMachine {
@@ -68,6 +85,12 @@ export class BareMetalMachine {
   private serialBuf: number[] = [];
   private serialTimer: ReturnType<typeof setTimeout> | null = null;
   private generation = 0;
+  private paused = false;
+  private hit: number | null = null;
+  private resumedTicks = 0;
+  private debugTimer: ReturnType<typeof setInterval> | null = null;
+  private debugCbs = new Set<(s: DebugState) => void>();
+  private breakpoints = new Breakpoints(() => this.cpu());
 
   constructor(private env: V86Environment) {}
 
@@ -94,6 +117,79 @@ export class BareMetalMachine {
     return () => void this.serialCbs.delete(cb);
   }
 
+  /** Called when the machine pauses (e.g. at a breakpoint) or resumes. */
+  onDebugState(cb: (s: DebugState) => void) {
+    this.debugCbs.add(cb);
+    return () => void this.debugCbs.delete(cb);
+  }
+  private notifyDebug() {
+    for (const cb of [...this.debugCbs]) cb({ paused: this.paused, hit: this.hit });
+  }
+  private cpu(): CpuLike | null {
+    return ((this.emulator as unknown as VgaHolder | null)?.v86?.cpu as CpuLike | undefined) ?? null;
+  }
+
+  /** Stops the CPU; the screen and memory stay as they are until resume(). */
+  async pause() {
+    if (this.status !== "running" || this.paused || !this.emulator) return;
+    await this.emulator.stop();
+    this.paused = true;
+    this.notifyDebug();
+  }
+
+  async resume() {
+    if (this.status !== "running" || !this.paused || !this.emulator) return;
+    if (this.hit !== null) this.breakpoints.release(this.hit); // run the real instruction, not the spin lock
+    this.hit = null;
+    this.paused = false;
+    this.resumedTicks = 0;
+    this.notifyDebug();
+    await this.emulator.run();
+  }
+
+  /** Flat addresses to break at (see debugger.ts for how this works and its limits). */
+  setBreakpoints(addresses: number[]) {
+    this.breakpoints.set(addresses);
+    this.startDebugTimer();
+  }
+
+  /** Current registers, breakpoints and (optionally) a window of memory. */
+  inspect(memory?: { addr: number; length: number }): DebugSnapshot {
+    const cpu = this.cpu();
+    const data = memory ? this.breakpoints.read(memory.addr, memory.length) : null;
+    return {
+      paused: this.paused,
+      hit: this.hit,
+      breakpoints: this.breakpoints.addresses,
+      registers: cpu && this.status === "running" ? readRegisters(cpu) : null,
+      memory: memory && data ? { addr: memory.addr, data } : null,
+    };
+  }
+
+  /** Watches for the CPU parking on a breakpoint, and re-arms released ones once it has moved on. */
+  private startDebugTimer() {
+    if (this.debugTimer || !this.breakpoints.addresses.length) return;
+    this.debugTimer = setInterval(() => {
+      const cpu = this.cpu();
+      if (!cpu || this.paused || this.hit !== null || this.status !== "running") return;
+      const ip = cpu.instruction_pointer[0] >>> 0;
+      const hit = this.breakpoints.hitAt(ip);
+      if (hit !== null) {
+        this.hit = hit;
+        void this.emulator?.stop().then(() => {
+          this.paused = true;
+          this.notifyDebug();
+        });
+        return;
+      }
+      if (++this.resumedTicks >= REARM_TICKS) this.breakpoints.rearm(ip);
+    }, 25);
+  }
+  private stopDebugTimer() {
+    if (this.debugTimer) clearInterval(this.debugTimer);
+    this.debugTimer = null;
+  }
+
   onDisplay(cb: (f: DisplayFrame) => void) {
     this.displayCbs.add(cb);
     this.display.invalidate();
@@ -115,14 +211,24 @@ export class BareMetalMachine {
     this.displayTimer = null;
   }
 
-  async boot({ image, name, memoryMB = 64 }: BareMetalBoot): Promise<void> {
+  async boot({ image, name, memoryMB = 64, breakpoints = [] }: BareMetalBoot): Promise<void> {
     if (this.status === "booting" || this.status === "running") return;
     const gen = ++this.generation;
     this.setStatus("booting");
     try {
       const V86 = await this.env.loadV86();
       const kind = driveFor(name, image.length);
-      const bytes = padImage(image, kind);
+      let bytes = padImage(image, kind);
+      const preloaded: Array<[number, Uint8Array]> = [];
+      if (breakpoints.length && kind !== "cdrom") {
+        bytes = bytes === image ? image.slice() : bytes;
+        for (const addr of breakpoints) {
+          const at = addr - BOOT_ADDRESS;
+          if (at < 0 || at + 2 > 510 || at + 2 > bytes.length) continue;
+          preloaded.push([addr, bytes.slice(at, at + 2)]);
+          bytes.set([0xeb, 0xfe], at);
+        }
+      }
       const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
       const options: Record<string, unknown> = {
         memory_size: memoryMB * 1024 * 1024,
@@ -140,6 +246,9 @@ export class BareMetalMachine {
       await new Promise<void>((resolve) => emulator.add_listener("emulator-ready", () => resolve()));
       if (gen !== this.generation) return void (await emulator.destroy());
       this.emulator = emulator;
+      this.breakpoints = new Breakpoints(() => this.cpu());
+      for (const [addr, original] of preloaded) this.breakpoints.preloaded(addr, original);
+      this.startDebugTimer();
       this.display = this.newDisplay();
       const vga = (emulator as unknown as VgaHolder).v86?.cpu?.devices?.vga;
       if (vga) vga.screen = this.display;
@@ -187,6 +296,10 @@ export class BareMetalMachine {
 
   private async teardown() {
     this.stopDisplayTimer();
+    this.stopDebugTimer();
+    this.breakpoints = new Breakpoints(() => this.cpu());
+    this.paused = false;
+    this.hit = null;
     this.flushSerial();
     const emulator = this.emulator;
     this.emulator = null;

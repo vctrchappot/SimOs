@@ -26,3 +26,18 @@ describe("boot images", () => {
     for (const f of ["/hello.c", "/img", "/a.png"]) expect(isBootImage(f)).toBe(false);
   });
 });
+
+describe("addresses", () => {
+  it("parses hex, decimal and real-mode segment:offset", async () => {
+    const { parseAddress } = await import("@/os/runtime/debugger");
+    expect(parseAddress("0x7c00")).toBe(0x7c00);
+    expect(parseAddress("7c00h")).toBe(0x7c00);
+    expect(parseAddress("31744")).toBe(31744);
+    expect(parseAddress("0000:7c00")).toBe(0x7c00);
+    expect(parseAddress("1000:0010")).toBe(0x10010);
+    expect(parseAddress("0x100000000")).toBeNull();
+    expect(parseAddress("g1")).toBeNull();
+    expect(parseAddress("")).toBeNull();
+    expect(parseAddress("10000:0")).toBeNull();
+  });
+});

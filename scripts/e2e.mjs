@@ -167,8 +167,20 @@ await bootButton.waitFor({ timeout: 20000 });
 await bootButton.click();
 const serialLog = page.getByLabel("Serial output");
 await serialLog.getByText(/Hello from my own operating system!/).waitFor({ timeout: 60000 });
+// debugger: break where a typed letter is echoed (0x7c1a is `call putc` in boot.asm), inspect, continue
+const debug = page.getByLabel("Debugger");
+await debug.getByLabel("Breakpoint address").fill("0x7c1a");
+await debug.getByRole("button", { name: "Add", exact: true }).click();
 await screen.click();
-await page.keyboard.type("abc", { delay: 50 });
+await page.keyboard.type("a", { delay: 50 });
+await debug.getByText("Stopped at breakpoint 7C1A").waitFor({ timeout: 20000 });
+await debug.getByLabel("Registers").getByText(/1E61/).waitFor({ timeout: 5000 }); // ah = scancode, al = 'a'
+await page.screenshot({ path: ".scratch/debugger.png" });
+await debug.getByRole("button", { name: "Continue" }).click();
+await page.waitForFunction(() => /Type something: a$/.test(document.querySelector('[aria-label="Serial output"]')?.textContent?.trim() ?? ""), null, { timeout: 15000 });
+await debug.getByRole("button", { name: "Remove breakpoint 7C1A" }).click();
+await screen.click();
+await page.keyboard.type("bc", { delay: 50 });
 await page.waitForFunction(() => /Type something: abc/.test(document.querySelector('[aria-label="Serial output"]')?.textContent ?? ""), null, { timeout: 15000 });
 await page.screenshot({ path: ".scratch/baremetal.png" });
 await page.getByRole("button", { name: "Power off", exact: true }).last().click();

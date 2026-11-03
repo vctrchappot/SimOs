@@ -80,6 +80,13 @@ interface StudioState {
   bootImages(): string[];
   bootImage(path: string): Promise<void>;
   stopImage(): void;
+  /** Debugger: breakpoints (flat addresses) and whether the image is stopped, and where. */
+  breakpoints: number[];
+  debugPaused: boolean;
+  debugHit: number | null;
+  setBreakpoints(addresses: number[]): void;
+  pauseImage(): void;
+  resumeImage(): void;
 
   sidebar: "files" | "search";
   /** A search hit the editor should scroll to (nonce makes repeated clicks on one hit work). */
@@ -164,6 +171,16 @@ export const useStudio = create<StudioState>((set, get) => {
       bare.boot(studio.fs.readFile(path), path);
     },
     stopImage: () => get().bare?.shutdown(),
+    breakpoints: [],
+    debugPaused: false,
+    debugHit: null,
+    setBreakpoints(addresses) {
+      const unique = [...new Set(addresses)].sort((a, b) => a - b);
+      set({ breakpoints: unique });
+      get().bare?.setBreakpoints(unique);
+    },
+    pauseImage: () => get().bare?.pause(),
+    resumeImage: () => get().bare?.resume(),
     bootedNetwork: null,
     terminals: [0],
     activeTerminal: 0,
@@ -249,6 +266,8 @@ export const useStudio = create<StudioState>((set, get) => {
       const bare = new BareMetalRuntime(() => new Worker(new URL("../os/runtime/baremetal.worker.ts", import.meta.url), { type: "module" }));
       const decoder = new TextDecoder();
       bare.onStatus((bareStatus, bareDetail) => set({ bareStatus, bareDetail }));
+      bare.onDebugState((s) => set({ debugPaused: s.paused, debugHit: s.hit }));
+      bare.setBreakpoints(get().breakpoints);
       bare.onSerial((d) => set((s) => ({ bareLog: (s.bareLog + decoder.decode(d, { stream: true })).slice(-16384) })));
       set({ bare });
       runtime.onStatus((status, statusDetail) => {
