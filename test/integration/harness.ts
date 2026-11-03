@@ -25,7 +25,8 @@ export function makeStudio(profile: OSProfile, dbName: string, template: Record<
   const studio = new Studio({ runtime, store: new IdbProjectStore(dbName), template, sync: { pollMs: 0 } });
   let output = "";
   let all = "";
-  runtime.onOutput((d) => {
+  runtime.onOutput((d, terminal) => {
+    if (terminal !== 0) return;
     const text = new TextDecoder().decode(d);
     output += text;
     all += text;

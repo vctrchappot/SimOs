@@ -1,5 +1,8 @@
 /** Contracts between the studio and whatever machine is running the OS. */
 
+/** Serial consoles the machine offers (ttyS0..ttyS3). Each runs its own login shell. */
+export const TERMINAL_COUNT = 4;
+
 export type RuntimeStatus = "stopped" | "booting" | "running" | "stopping" | "error";
 
 export interface GuestStat {
@@ -33,8 +36,12 @@ export interface OSRuntime {
   /** Guest filesystem view; available only while running. */
   readonly guestFs: GuestFS | null;
   onStatus(cb: (status: RuntimeStatus, detail?: string) => void): () => void;
-  /** Raw bytes from the guest's console (feed straight into a terminal). */
-  onOutput(cb: (data: Uint8Array) => void): () => void;
+  /** Raw bytes from a guest console (feed straight into a terminal). */
+  onOutput(cb: (data: Uint8Array, terminal: number) => void): () => void;
+  /** Everything a console printed recently, so a view opened later can catch up. */
+  history(terminal: number): Uint8Array;
+  /** Ends the shell on a terminal; init starts a fresh login shell there. Terminal 0 is the system console. */
+  closeTerminal(terminal: number): void;
   /** Called once the guest finished booting and its shell is ready for input. */
   onReady(cb: () => void): () => void;
   /**
@@ -46,8 +53,8 @@ export interface OSRuntime {
   boot(prepare?: (project: GuestFS, root: GuestFS) => Promise<void>): Promise<void>;
   /** Hard power-off of the virtual machine. */
   shutdown(): Promise<void>;
-  sendInput(data: string): void;
-  resize(cols: number, rows: number): void;
+  sendInput(data: string, terminal?: number): void;
+  resize(cols: number, rows: number, terminal?: number): void;
 }
 
 /**

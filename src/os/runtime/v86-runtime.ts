@@ -1,5 +1,7 @@
+import { OutputHistory } from "./output-history";
+import { endShell } from "./terminal-control";
+import { TERMINAL_COUNT, type GuestFS, type OSProfile, type OSRuntime, type RuntimeStatus } from "./types";
 import { V86GuestFS, type Fs9p } from "./v86-guest-fs";
-import type { GuestFS, OSProfile, OSRuntime, RuntimeStatus } from "./types";
 
 /** Minimal surface of a v86 emulator instance that the runtime relies on. */
 interface Emulator {
@@ -19,10 +21,12 @@ export interface V86Environment {
 
 const encoder = new TextEncoder();
 const BOOT_TIMEOUT_MS = 180_000;
+const terminals = Array.from({ length: TERMINAL_COUNT }, (_, i) => i);
 
 /**
  * Runs an OSProfile on the v86 x86 emulator. The guest is a real Linux kernel; the project
- * directory is shared with the host through virtio-9p.
+ * directory is shared with the host through virtio-9p. Each of the four emulated serial ports
+ * carries its own login shell.
  */
 export class V86Runtime implements OSRuntime {
   status: RuntimeStatus = "stopped";
@@ -31,13 +35,14 @@ export class V86Runtime implements OSRuntime {
   private emulator: Emulator | null = null;
   private rootFs: V86GuestFS | null = null;
   private statusCbs = new Set<(s: RuntimeStatus, detail?: string) => void>();
-  private outputCbs = new Set<(d: Uint8Array) => void>();
+  private outputCbs = new Set<(d: Uint8Array, terminal: number) => void>();
   private readyCbs = new Set<() => void>();
-  private outBuf: number[] = [];
+  private outBuf: number[][] = terminals.map(() => []);
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private logs = new OutputHistory(TERMINAL_COUNT);
   private tail = "";
   private generation = 0;
-  private size: { cols: number; rows: number } | null = null;
+  private sizes: Array<{ cols: number; rows: number } | undefined> = [];
 
   constructor(
     readonly profile: OSProfile,
@@ -48,13 +53,16 @@ export class V86Runtime implements OSRuntime {
     this.statusCbs.add(cb);
     return () => void this.statusCbs.delete(cb);
   }
-  onOutput(cb: (d: Uint8Array) => void) {
+  onOutput(cb: (d: Uint8Array, terminal: number) => void) {
     this.outputCbs.add(cb);
     return () => void this.outputCbs.delete(cb);
   }
   onReady(cb: () => void) {
     this.readyCbs.add(cb);
     return () => void this.readyCbs.delete(cb);
+  }
+  history(terminal: number) {
+    return this.logs.get(terminal);
   }
 
   private setStatus(s: RuntimeStatus, detail?: string) {
@@ -67,6 +75,7 @@ export class V86Runtime implements OSRuntime {
     const gen = ++this.generation;
     this.setStatus("booting");
     this.tail = "";
+    this.logs.clear();
     try {
       const V86 = await this.env.loadV86();
       const { assets } = this.profile;
@@ -78,6 +87,10 @@ export class V86Runtime implements OSRuntime {
         disable_keyboard: true,
         disable_mouse: true,
         disable_speaker: true,
+        // Serial ports 1-3 become /dev/ttyS1-3: extra, fully independent consoles.
+        uart1: true,
+        uart2: true,
+        uart3: true,
         ...this.env.machineOptions,
       };
       if (assets.rootfs) {
@@ -92,16 +105,18 @@ export class V86Runtime implements OSRuntime {
       await new Promise<void>((resolve) => emulator.add_listener("emulator-ready", () => resolve()));
       if (gen !== this.generation) return void (await emulator.destroy());
 
-      emulator.add_listener("serial0-output-byte", ((byte: number) => this.onSerialByte(byte)) as (a: never) => void);
+      for (const t of terminals) {
+        emulator.add_listener(`serial${t}-output-byte`, ((byte: number) => this.onSerialByte(t, byte)) as (a: never) => void);
+      }
 
       this.rootFs = new V86GuestFS(emulator.fs9p, this.profile.rootDir);
-      const project = new V86GuestFS(emulator.fs9p, this.profile.rootDir.replace(/\/$/, "") +this.profile.projectDir);
+      const project = new V86GuestFS(emulator.fs9p, this.profile.rootDir.replace(/\/$/, "") + this.profile.projectDir);
       project.ensureRoot();
       for (const [path, file] of Object.entries(this.profile.bootFiles)) {
         await this.rootFs.write(path, encoder.encode(file.content));
         this.rootFs.chmod(path, file.mode ?? 0o644);
       }
-      this.writeSize();
+      for (const t of terminals) this.writeSize(t);
       this.guestFs = project;
       await prepare?.(project, this.rootFs);
       if (gen !== this.generation) return void (await emulator.destroy());
@@ -128,13 +143,13 @@ export class V86Runtime implements OSRuntime {
     }
   }
 
-  private onSerialByte(byte: number) {
-    const { readyMarker } = this.profile;
-    this.tail = (this.tail + String.fromCharCode(byte)).slice(-64);
-
-    this.outBuf.push(byte);
+  private onSerialByte(terminal: number, byte: number) {
+    this.outBuf[terminal].push(byte);
     this.flushTimer ??= setTimeout(() => this.flushOutput(), 8);
-    if (this.tail.endsWith(readyMarker) && this.status === "booting") {
+    // The system console (terminal 0) announces readiness once its login shell has started.
+    if (terminal !== 0) return;
+    this.tail = (this.tail + String.fromCharCode(byte)).slice(-64);
+    if (this.tail.endsWith(this.profile.readyMarker) && this.status === "booting") {
       this.flushOutput(); // deliver the boot log before announcing readiness
       this.setStatus("running");
       for (const cb of [...this.readyCbs]) cb();
@@ -143,10 +158,13 @@ export class V86Runtime implements OSRuntime {
 
   private flushOutput() {
     this.flushTimer = null;
-    if (!this.outBuf.length) return;
-    const chunk = Uint8Array.from(this.outBuf);
-    this.outBuf = [];
-    for (const cb of [...this.outputCbs]) cb(chunk);
+    for (const t of terminals) {
+      if (!this.outBuf[t].length) continue;
+      const chunk = Uint8Array.from(this.outBuf[t]);
+      this.outBuf[t] = [];
+      this.logs.push(t, chunk);
+      for (const cb of [...this.outputCbs]) cb(chunk, t);
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -172,19 +190,26 @@ export class V86Runtime implements OSRuntime {
     }
   }
 
-  sendInput(data: string): void {
+  sendInput(data: string, terminal = 0): void {
     if (!this.emulator || (this.status !== "running" && this.status !== "booting")) return;
-    this.emulator.serial_send_bytes(0, encoder.encode(data));
+    this.emulator.serial_send_bytes(terminal, encoder.encode(data));
+  }
+
+  closeTerminal(terminal: number): void {
+    if (terminal === 0) return;
+    endShell((data) => this.sendInput(data, terminal));
+    this.logs.clear(terminal);
   }
 
   /** The shell applies the new size at its next prompt (see the profile script). */
-  resize(cols: number, rows: number): void {
-    this.size = { cols, rows };
-    this.writeSize();
+  resize(cols: number, rows: number, terminal = 0): void {
+    this.sizes[terminal] = { cols, rows };
+    this.writeSize(terminal);
   }
 
-  private writeSize() {
-    if (!this.rootFs || !this.size || this.status === "stopped") return;
-    void this.rootFs.write("/etc/simos-size", encoder.encode(`rows ${this.size.rows} cols ${this.size.cols}\n`));
+  private writeSize(terminal: number) {
+    const size = this.sizes[terminal];
+    if (!this.rootFs || !size || this.status === "stopped") return;
+    void this.rootFs.write(`/etc/simos-size.${terminal}`, encoder.encode(`rows ${size.rows} cols ${size.cols}\n`));
   }
 }

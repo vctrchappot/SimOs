@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { basename, dirname, join, validateName } from "@/os/vfs/path";
 import type { Entry } from "@/os/vfs/types";
+import { exportProject, importProject } from "@/os/project-archive";
 import { useStudio } from "@/store/studio";
 
 type Draft = { mode: "file" | "folder"; parent: string } | { mode: "rename"; path: string };
@@ -83,6 +84,30 @@ export function Explorer() {
   const [selected, setSelected] = useState<string>("/");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const { setNotice } = useStudio.getState();
+
+  const download = () => {
+    const blob = new Blob([exportProject(studio.fs) as BlobPart], { type: "application/zip" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "simos-project.zip";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    setNotice("Project exported as simos-project.zip");
+  };
+
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const s = await importProject(studio.fs, new Uint8Array(await file.arrayBuffer()));
+      setNotice(`Imported ${s.files} files, ${s.folders} folders${s.overwritten ? ` (${s.overwritten} replaced)` : ""}`);
+    } catch (err) {
+      useStudio.setState({ error: `Import failed: ${err instanceof Error ? err.message : String(err)}` });
+    }
+    if (picker.current) picker.current.value = "";
+  };
 
   const entries = useMemo(() => studio.fs.list(), [studio, rev]);
   const children = useMemo(() => {
@@ -102,6 +127,82 @@ export function Explorer() {
       if (!next.delete(path)) next.add(path);
       return next;
     });
+
+  /** Rows in display order, for keyboard navigation. */
+  const visible = useMemo(() => {
+    const out: string[] = [];
+    const walk = (parent: string) => {
+      for (const entry of children.get(parent) ?? []) {
+        out.push(entry.path);
+        if (entry.kind === "dir" && expanded.has(entry.path)) walk(entry.path);
+      }
+    };
+    walk("/");
+    return out;
+  }, [children, expanded]);
+
+  const tree = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    tree.current?.querySelector(`[data-path="${CSS.escape(selected)}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+
+  const onKeyDown = (ev: React.KeyboardEvent) => {
+    if (draft || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    const at = visible.indexOf(selected);
+    const stat = studio.fs.stat(selected);
+    const go = (i: number) => visible[Math.max(0, Math.min(visible.length - 1, i))] && setSelected(visible[Math.max(0, Math.min(visible.length - 1, i))]);
+    const consume = () => {
+      ev.preventDefault();
+      ev.stopPropagation();
+    };
+    switch (ev.key) {
+      case "ArrowDown":
+        consume();
+        return go(at + 1);
+      case "ArrowUp":
+        consume();
+        return go(at < 0 ? 0 : at - 1);
+      case "Home":
+        consume();
+        return go(0);
+      case "End":
+        consume();
+        return go(visible.length - 1);
+      case "ArrowRight":
+        consume();
+        if (stat?.kind !== "dir") return;
+        if (!expanded.has(selected)) return toggle(selected);
+        return go(at + 1);
+      case "ArrowLeft":
+        consume();
+        if (stat?.kind === "dir" && expanded.has(selected)) return toggle(selected);
+        if (dirname(selected) !== "/") setSelected(dirname(selected));
+        return;
+      case "Enter":
+      case " ":
+        consume();
+        if (stat?.kind === "dir") return toggle(selected);
+        if (stat) openFile(selected);
+        return;
+      case "F2":
+        consume();
+        if (stat) setDraft({ mode: "rename", path: selected });
+        return;
+      case "Delete":
+      case "Backspace":
+        consume();
+        if (!stat) return;
+        if (pendingDelete === selected) {
+          setPendingDelete(null);
+          remove(selected);
+          setSelected(visible[Math.max(0, at - 1)] ?? "/");
+        } else setPendingDelete(selected);
+        return;
+      case "Escape":
+        setPendingDelete(null);
+        return;
+    }
+  };
 
   const startCreate = (mode: "file" | "folder") => {
     const sel = studio.fs.stat(selected);
@@ -131,6 +232,7 @@ export function Explorer() {
           <div key={e.path}>
             <div
               role="treeitem"
+              data-path={e.path}
               aria-selected={activePath === e.path}
               style={{ paddingLeft: 8 + depth * 12 }}
               onClick={() => {
@@ -146,7 +248,7 @@ export function Explorer() {
               {isDir ? <Chevron open={open} /> : <span className={icon} />}
               {isDir ? <FolderIcon /> : <FileIcon />}
               <span className="min-w-0 flex-1 truncate">{basename(e.path)}</span>
-              <span className="hidden gap-0.5 group-hover:flex" onClick={(ev) => ev.stopPropagation()}>
+              <span className={pendingDelete === e.path ? "flex gap-0.5" : "hidden gap-0.5 group-hover:flex"} onClick={(ev) => ev.stopPropagation()}>
                 {pendingDelete === e.path ? (
                   <button
                     className="rounded px-1.5 text-[11px] text-bad hover:bg-bad/15"
@@ -177,7 +279,7 @@ export function Explorer() {
   );
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-panel" onMouseLeave={() => setPendingDelete(null)}>
+    <div className="flex min-h-0 flex-1 flex-col" onMouseLeave={() => setPendingDelete(null)}>
       <div className="flex h-9 items-center justify-between px-3 text-[11px] font-medium uppercase tracking-wider text-faint">
         <span>Project</span>
         <span className="flex gap-1 normal-case">
@@ -189,10 +291,19 @@ export function Explorer() {
           </button>
         </span>
       </div>
-      <div role="tree" className="min-h-0 flex-1 overflow-auto pb-2" onClick={(e) => e.target === e.currentTarget && setSelected("/")}>
+      <div ref={tree} role="tree" tabIndex={0} aria-label="Project files" onKeyDown={onKeyDown} className="min-h-0 flex-1 overflow-auto pb-2 outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--color-accent)]" onClick={(e) => e.target === e.currentTarget && setSelected("/")}>
         {renderLevel("/", 0)}
         {!entries.length && !draft && <div className="px-3 py-2 text-faint">Empty project</div>}
       </div>
-    </aside>
+      <div className="flex shrink-0 items-center gap-1 border-t border-line px-2 py-1.5 text-[11px] text-dim">
+        <button className="rounded px-1.5 py-0.5 hover:bg-hover hover:text-fg" onClick={() => picker.current?.click()} title="Add the files of a .zip to the project">
+          Import zip
+        </button>
+        <button className="rounded px-1.5 py-0.5 hover:bg-hover hover:text-fg" onClick={download} title="Download the whole project as a .zip">
+          Export zip
+        </button>
+        <input ref={picker} type="file" accept=".zip,application/zip" hidden onChange={(ev) => void upload(ev.target.files?.[0])} />
+      </div>
+    </div>
   );
 }

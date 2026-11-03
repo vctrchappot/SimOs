@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStudio } from "@/store/studio";
-import { Explorer } from "./Explorer";
+import { Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
 
 // Monaco and xterm touch `window`; load them on the client only.
@@ -28,6 +28,7 @@ export function Workspace() {
   const ready = useStudio((s) => s.ready);
   const error = useStudio((s) => s.error);
   const dismissError = useStudio((s) => s.dismissError);
+  const setSidebar = useStudio((s) => s.setSidebar);
   const [split, setSplit] = useState(0.5);
   const [dragging, setDragging] = useState(false);
   const container = useRef<HTMLDivElement>(null);
@@ -36,6 +37,18 @@ export function Workspace() {
     setSplit(loadSplit());
     void init();
   }, [init]);
+
+  // Ctrl/Cmd+Shift+F opens the project search from anywhere, including the editor.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setSidebar("search");
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [setSidebar]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
@@ -79,7 +92,7 @@ export function Workspace() {
         <section className="flex min-w-0 flex-col bg-panel" style={{ width: `${split * 100}%` }}>
           {ready ? (
             <div className="flex min-h-0 flex-1">
-              <Explorer />
+              <Sidebar />
               <EditorPane />
             </div>
           ) : (

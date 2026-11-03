@@ -3,9 +3,10 @@
 import { create } from "zustand";
 import { createBrowserRuntime } from "@/os/runtime/create-runtime";
 import { defaultProfile } from "@/os/runtime/profiles";
-import type { RuntimeStatus } from "@/os/runtime/types";
+import { TERMINAL_COUNT, type RuntimeStatus } from "@/os/runtime/types";
 import { Studio } from "@/os/studio";
 import { runCommandFor } from "@/os/run-command";
+import type { SearchMatch } from "@/os/search";
 import { PROJECT_TEMPLATE } from "@/os/template";
 import { IdbProjectStore } from "@/os/vfs/persistence";
 
@@ -41,7 +42,19 @@ interface StudioState {
   error: string | null;
   /** Short-lived informational message (e.g. a file changed inside the OS). */
   notice: string | null;
+  /** Open terminal tabs (each is a serial console of the guest, 0 is the system console). */
+  terminals: number[];
+  activeTerminal: number;
 
+  sidebar: "files" | "search";
+  /** A search hit the editor should scroll to (nonce makes repeated clicks on one hit work). */
+  reveal: { path: string; line: number; column: number; length: number; nonce: number } | null;
+  setSidebar(mode: "files" | "search"): void;
+  revealMatch(match: SearchMatch): void;
+
+  openTerminal(): void;
+  closeTerminal(index: number): void;
+  setActiveTerminal(index: number): void;
   registerFlush(fn: () => void): void;
   setNotice(text: string): void;
   runFile(): Promise<void>;
@@ -95,6 +108,37 @@ export const useStudio = create<StudioState>((set, get) => {
     activePath: null,
     error: null,
     notice: null,
+    terminals: [0],
+    activeTerminal: 0,
+    sidebar: "files",
+    reveal: null,
+
+    setSidebar(mode) {
+      set({ sidebar: mode });
+    },
+
+    revealMatch(match) {
+      get().openFile(match.path);
+      set({ reveal: { path: match.path, line: match.line, column: match.column, length: match.length, nonce: Date.now() } });
+    },
+
+    openTerminal() {
+      const { terminals } = get();
+      const free = Array.from({ length: TERMINAL_COUNT }, (_, i) => i).find((i) => !terminals.includes(i));
+      if (free !== undefined) set({ terminals: [...terminals, free], activeTerminal: free });
+    },
+
+    closeTerminal(index) {
+      const { terminals, activeTerminal, studio } = get();
+      if (index === 0 || !terminals.includes(index)) return;
+      studio?.runtime.closeTerminal(index);
+      const next = terminals.filter((t) => t !== index);
+      set({ terminals: next, activeTerminal: activeTerminal === index ? (next.at(-1) ?? 0) : activeTerminal });
+    },
+
+    setActiveTerminal(index) {
+      set({ activeTerminal: index });
+    },
 
     registerFlush(fn) {
       flushEditors = fn;
@@ -113,7 +157,8 @@ export const useStudio = create<StudioState>((set, get) => {
       if (!command) return set({ error: `Don’t know how to run ${activePath}. Open a .sh, .c or Makefile.` });
       flushEditors?.();
       await studio.settle();
-      studio.runtime.sendInput(CLEAR_LINE + command + "\n");
+      get().setActiveTerminal(0); // "Run file" always runs on the system console
+      studio.runtime.sendInput(CLEAR_LINE + command + "\n", 0);
     },
 
     async init() {

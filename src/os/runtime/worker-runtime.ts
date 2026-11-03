@@ -1,4 +1,6 @@
-import type { GuestFS, GuestStat, OSProfile, OSRuntime, RuntimeStatus } from "./types";
+import { OutputHistory } from "./output-history";
+import { endShell } from "./terminal-control";
+import { TERMINAL_COUNT, type GuestFS, type GuestStat, type OSProfile, type OSRuntime, type RuntimeStatus } from "./types";
 import type { FromWorker, FsMethod, FsTarget, ToWorker } from "./worker-protocol";
 
 /** A GuestFS whose calls are executed next to the emulator, inside the worker. */
@@ -38,9 +40,10 @@ export class WorkerRuntime implements OSRuntime {
 
   private worker: Worker | null = null;
   private statusCbs = new Set<(s: RuntimeStatus, detail?: string) => void>();
-  private outputCbs = new Set<(d: Uint8Array) => void>();
+  private outputCbs = new Set<(d: Uint8Array, terminal: number) => void>();
+  private logs = new OutputHistory(TERMINAL_COUNT);
   private readyCbs = new Set<() => void>();
-  private size: { cols: number; rows: number } | null = null;
+  private sizes: Array<{ cols: number; rows: number } | undefined> = [];
   private nextCall = 1;
   private calls = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
@@ -53,9 +56,12 @@ export class WorkerRuntime implements OSRuntime {
     this.statusCbs.add(cb);
     return () => void this.statusCbs.delete(cb);
   }
-  onOutput(cb: (d: Uint8Array) => void) {
+  onOutput(cb: (d: Uint8Array, terminal: number) => void) {
     this.outputCbs.add(cb);
     return () => void this.outputCbs.delete(cb);
+  }
+  history(terminal: number) {
+    return this.logs.get(terminal);
   }
   onReady(cb: () => void) {
     this.readyCbs.add(cb);
@@ -83,6 +89,7 @@ export class WorkerRuntime implements OSRuntime {
   async boot(prepare?: (project: GuestFS, root: GuestFS) => Promise<void>): Promise<void> {
     if (this.status === "booting" || this.status === "running") return;
     this.dispose(); // a worker left over from a failed boot
+    this.logs.clear();
     this.setStatus("booting");
     let worker: Worker;
     try {
@@ -111,7 +118,8 @@ export class WorkerRuntime implements OSRuntime {
           if (msg.status === "error") this.dispose();
           break;
         case "output":
-          for (const cb of [...this.outputCbs]) cb(msg.data);
+          this.logs.push(msg.terminal, msg.data);
+          for (const cb of [...this.outputCbs]) cb(msg.data, msg.terminal);
           break;
         case "ready":
           for (const cb of [...this.readyCbs]) cb();
@@ -142,7 +150,7 @@ export class WorkerRuntime implements OSRuntime {
       this.dispose();
     };
 
-    this.send({ t: "boot", profile: this.profile, size: this.size });
+    this.send({ t: "boot", profile: this.profile, sizes: this.sizes });
     await settled;
   }
 
@@ -161,12 +169,18 @@ export class WorkerRuntime implements OSRuntime {
     this.setStatus("stopped");
   }
 
-  sendInput(data: string): void {
-    if (this.status === "running" || this.status === "booting") this.send({ t: "input", data });
+  sendInput(data: string, terminal = 0): void {
+    if (this.status === "running" || this.status === "booting") this.send({ t: "input", data, terminal });
   }
 
-  resize(cols: number, rows: number): void {
-    this.size = { cols, rows };
-    this.send({ t: "resize", cols, rows });
+  closeTerminal(terminal: number): void {
+    if (terminal === 0) return;
+    endShell((data) => this.sendInput(data, terminal));
+    this.logs.clear(terminal);
+  }
+
+  resize(cols: number, rows: number, terminal = 0): void {
+    this.sizes[terminal] = { cols, rows };
+    this.send({ t: "resize", cols, rows, terminal });
   }
 }

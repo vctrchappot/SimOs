@@ -28,6 +28,8 @@ export function EditorPane() {
   const notice = useStudio((s) => s.notice);
 
   const monacoRef = useRef<Monaco | null>(null);
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const reveal = useStudio((s) => s.reveal);
   /** The text each file had the last time editor and project agreed. */
   const lastSynced = useRef(new Map<string, string>());
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -95,6 +97,24 @@ export function EditorPane() {
     }
   }, [rev, openTabs, studio, setNotice]);
 
+  // Scroll to a search hit once the editor shows that file (switching models takes a few frames).
+  useEffect(() => {
+    if (!reveal || reveal.path !== activePath) return;
+    let frames = 0;
+    let id = 0;
+    const tryReveal = () => {
+      const editor = editorRef.current;
+      if (editor?.getModel()?.uri.path === reveal.path) {
+        const range = { startLineNumber: reveal.line, startColumn: reveal.column, endLineNumber: reveal.line, endColumn: reveal.column + reveal.length };
+        editor.setSelection(range);
+        editor.revealRangeInCenter(range);
+        editor.focus();
+      } else if (frames++ < 30) id = requestAnimationFrame(tryReveal);
+    };
+    id = requestAnimationFrame(tryReveal);
+    return () => cancelAnimationFrame(id);
+  }, [reveal, activePath]);
+
   const beforeMount: BeforeMount = (monaco) => {
     monaco.editor.defineTheme("simos", {
       base: "vs-dark",
@@ -115,6 +135,7 @@ export function EditorPane() {
 
   const onMount: OnMount = (editor, monaco) => {
     monacoRef.current = monaco;
+    editorRef.current = editor;
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       const path = useStudio.getState().activePath;
       if (path) save(path);

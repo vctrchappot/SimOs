@@ -5,17 +5,17 @@ export type FsMethod = "scan" | "stat" | "read" | "write" | "mkdir" | "remove" |
 
 /** Main thread -> worker. */
 export type ToWorker =
-  | { t: "boot"; profile: OSProfile; size: { cols: number; rows: number } | null }
+  | { t: "boot"; profile: OSProfile; sizes: Array<{ cols: number; rows: number } | undefined> }
   | { t: "prepared" }
   | { t: "prepare-failed"; error: string }
-  | { t: "input"; data: string }
-  | { t: "resize"; cols: number; rows: number }
+  | { t: "input"; data: string; terminal: number }
+  | { t: "resize"; cols: number; rows: number; terminal: number }
   | { t: "fs"; id: number; target: FsTarget; method: FsMethod; args: unknown[] };
 
 /** Worker -> main thread. */
 export type FromWorker =
   | { t: "status"; status: RuntimeStatus; detail?: string }
-  | { t: "output"; data: Uint8Array }
+  | { t: "output"; data: Uint8Array; terminal: number }
   | { t: "ready" }
   /** The guest filesystem exists; the main thread should copy the project in, then answer `prepared`. */
   | { t: "prepare" }

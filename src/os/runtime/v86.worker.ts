@@ -28,9 +28,9 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
   switch (msg.t) {
     case "boot": {
       runtime = new V86Runtime(msg.profile, browserEnvironment);
-      if (msg.size) runtime.resize(msg.size.cols, msg.size.rows);
+      msg.sizes.forEach((size, terminal) => size && runtime!.resize(size.cols, size.rows, terminal));
       runtime.onStatus((status, detail) => post({ t: "status", status, detail }));
-      runtime.onOutput((data) => post({ t: "output", data }, [data.buffer]));
+      runtime.onOutput((data, terminal) => post({ t: "output", data, terminal }, [data.buffer]));
       runtime.onReady(() => post({ t: "ready" }));
       void runtime.boot(async (project, root) => {
         targets = { project, root };
@@ -48,10 +48,10 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
       prepared?.reject(new Error(msg.error));
       break;
     case "input":
-      runtime?.sendInput(msg.data);
+      runtime?.sendInput(msg.data, msg.terminal);
       break;
     case "resize":
-      runtime?.resize(msg.cols, msg.rows);
+      runtime?.resize(msg.cols, msg.rows, msg.terminal);
       break;
     case "fs":
       void handleFs(msg);

@@ -1,0 +1,29 @@
+# Alpine packages installed into the OS image by `npm run build:os`.
+# One per line; dependencies are resolved automatically. Lines starting with # are ignored.
+# Everything here is downloaded at build time and served from public/os, so the image grows
+# (it is fetched lazily by the emulator: only files the guest actually reads are loaded).
+
+# shell and everyday tools
+bash
+nano
+less
+file
+coreutils
+grep
+sed
+findutils
+util-linux-misc
+
+# C toolchain: make + the Tiny C Compiler (tcc) with musl headers
+make
+tcc
+tcc-dev
+tcc-libs-static
+musl-dev
+
+# Ideas (uncomment, then run `npm run build:os` again):
+# python3
+# vim
+# git
+# gawk
+# lua5.4

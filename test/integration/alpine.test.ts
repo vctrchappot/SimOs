@@ -88,6 +88,31 @@ describe.skipIf(!built)("Alpine Linux with bash", () => {
     expect((await sh("ls node_modules/pkg")).out.trim()).toBe("index.js"); // still there in the OS
   });
 
+  it("offers independent terminals: separate shells on ttyS1..3, closable with a fresh shell afterwards", async () => {
+    const seen = new Map<number, string>();
+    m.runtime.onOutput((d, t) => seen.set(t, (seen.get(t) ?? "") + new TextDecoder().decode(d)));
+    const until = async (t: number, re: RegExp) => {
+      for (let i = 0; i < 600; i++) {
+        if (re.test(seen.get(t) ?? "")) return;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      throw new Error(`terminal ${t} never matched ${re}: ${seen.get(t)}`);
+    };
+    // Terminals 1-3 already have a login shell waiting (replayed from history).
+    expect(new TextDecoder().decode(m.runtime.history(2))).toContain("Your project is");
+
+    m.runtime.sendInput("export WHO=second; tty; echo W=$WHO\n", 2);
+    await until(2, /\/dev\/ttyS2[\s\S]*W=second/);
+    expect((await sh("tty; echo W=${WHO:-none}")).out).toMatch(/\/dev\/ttyS0\s+W=none/);
+
+    seen.set(2, "");
+    m.runtime.closeTerminal(2);
+    await until(2, /Your project is/); // a brand-new login shell
+    m.runtime.sendInput("echo W=${WHO:-fresh}\n", 2);
+    await until(2, /W=fresh/);
+    expect(seen.get(1) ?? "").not.toContain("W=");
+  }, 90_000);
+
   it("applies the system overlay at boot: hostname, boot services and login-shell config", async () => {
     expect(m.bootLog()).toContain("[simos] starting 10-welcome.sh");
     expect(m.bootLog()).toContain("welcome service: starting on my-os");

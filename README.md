@@ -16,6 +16,11 @@ Nothing in the terminal is simulated: commands are executed by the guest's own `
 - **Run file** executes the open `.sh`, `.c` or Makefile in the terminal, visibly, as if you typed it.
 - **Keep build output out of the editor** with a `.simosignore` file (names, `*.o` globs, `dir/`,
   `/anchored`); `node_modules/` and `.git/` are always ignored. Ignored files stay inside the OS.
+- **Up to four real terminals.** Each tab is its own serial console (`ttyS0`-`ttyS3`) with its own login
+  shell; closing a tab ends that shell and a fresh one starts when you reopen it.
+- **Search in all files** (Ctrl+Shift+F), with case and regex options; a hit opens the file at that line.
+- **Import and export the project as a .zip** (no dependencies; unsafe paths and zip bombs are rejected).
+- **Keyboard-driven file tree:** arrows, Enter, F2 (rename), Delete (press twice to confirm).
 - Power on / Power off / Restart / Reset the machine; the project survives all of them and page reloads.
 
 ## Quick start
@@ -62,12 +67,13 @@ Not simulated but constrained by the platform, so know the limits:
 
 * **x86 emulation is slow** (roughly 20-50x slower than native). Compiling large programs takes a while.
 * **No networking** (no `apk add`, no `curl`). The image is fixed at build time; add packages by
-  adding them to `WANTED` in `scripts/build-rootfs.mjs`.
+  adding them to `scripts/packages.txt` and running `npm run build:os` again.
 * **32-bit x86 (i686)** guest, 256 MB RAM.
 * **Persistence covers the project directory** (`~/project`), not the rest of the OS. Installing
   or changing files outside `~/project` is lost on Stop/Restart. This is intentional: the OS image
   is a reproducible artifact, the project is your data.
-* The terminal is a serial console (`ttyS0`). Window-size changes reach the guest at the next prompt.
+* Terminals are serial consoles. Window-size changes reach the guest at the next prompt, so a full-screen
+  program started before a resize keeps its old size until you restart it.
 * File modes are not synced back to the editor. Files with a `#!` header are created executable.
 * Files above 4 MB created in the guest are not mirrored into the editor, and files above 512 KB are
   change-detected by size and mtime rather than content.
@@ -134,10 +140,14 @@ the OS image by `npm run build:os`), so the studio works offline after the first
 
 ## Roadmap
 
-Done: Phase 1 (editable OS overlay and boot services, Run file, visible sync errors and conflict notices)
-and Phase 2 (ignore rules, cheaper change detection, emulator in a Web Worker, CI).
-Next: multiple terminals, fast resume (saved VM state), find-in-files, zip import/export, then a
-display pane for graphical systems.
+Done: Phase 1 (editable OS overlay and boot services, Run file, visible sync errors and conflict notices),
+Phase 2 (ignore rules, cheaper change detection, emulator in a Web Worker, CI) and Phase 3 (terminals,
+project search, zip import/export, keyboard navigation, editable package list).
+
+Deliberately not done: *fast resume* from a saved VM state. Boot takes about 7 s, while a saved state
+would be hundreds of megabytes per project and tied to one exact image version.
+
+Next: a display pane (framebuffer and input) for graphical systems, then optional networking.
 
 ## Third-party software
 

@@ -24,7 +24,8 @@ class FakeWorker {
         this.emit({ t: "prepare" });
         break;
       case "prepared":
-        this.emit({ t: "output", data: new TextEncoder().encode("login: ") });
+        this.emit({ t: "output", data: new TextEncoder().encode("login: "), terminal: 0 });
+        this.emit({ t: "output", data: new TextEncoder().encode("second"), terminal: 2 });
         this.emit({ t: "status", status: "running" });
         this.emit({ t: "ready" });
         break;
@@ -65,7 +66,7 @@ describe("WorkerRuntime", () => {
     const statuses: string[] = [];
     rt.onStatus((s) => statuses.push(s));
     const out: string[] = [];
-    rt.onOutput((d) => out.push(new TextDecoder().decode(d)));
+    rt.onOutput((d, terminal) => terminal === 0 && out.push(new TextDecoder().decode(d)));
     rt.resize(100, 30);
 
     await rt.boot(async (project, root) => {
@@ -78,7 +79,9 @@ describe("WorkerRuntime", () => {
     expect(rt.status).toBe("running");
     expect(statuses).toEqual(["booting", "running"]);
     expect(out).toEqual(["login: "]);
-    expect(workers[0].received[0]).toMatchObject({ t: "boot", size: { cols: 100, rows: 30 } });
+    expect(new TextDecoder().decode(rt.history(2))).toBe("second");
+    expect(workers[0].received[0]).toMatchObject({ sizes: [{ cols: 100, rows: 30 }] });
+    expect(workers[0].received[0]).toMatchObject({ t: "boot" });
     expect(rt.guestFs).not.toBeNull();
   });
 
@@ -88,15 +91,15 @@ describe("WorkerRuntime", () => {
     rt.sendInput("ls\n");
     rt.resize(120, 40);
     expect(workers[0].received.slice(-2)).toEqual([
-      { t: "input", data: "ls\n" },
-      { t: "resize", cols: 120, rows: 40 },
+      { t: "input", data: "ls\n", terminal: 0 },
+      { t: "resize", cols: 120, rows: 40, terminal: 0 },
     ]);
     await rt.shutdown();
     expect(rt.status).toBe("stopped");
     expect(workers[0].terminated).toBe(true);
     expect(rt.guestFs).toBeNull();
     rt.sendInput("ignored");
-    expect(workers[0].received.at(-1)).not.toEqual({ t: "input", data: "ignored" });
+    expect(workers[0].received.at(-1)).not.toMatchObject({ data: "ignored" });
   });
 
   it("a failing prepare ends in an error status and frees the worker", async () => {

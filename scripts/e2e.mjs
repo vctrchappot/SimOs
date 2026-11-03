@@ -30,7 +30,15 @@ const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
 page.on("pageerror", (e) => log("PAGE ERROR", e.message));
 page.on("console", (m) => m.type() === "error" && log("console.error", m.text().slice(0, 200)));
 
-const termText = () => page.evaluate(() => [...document.querySelectorAll(".xterm-rows > div")].map((d) => d.textContent).join("\n"));
+// Only the visible terminal tab counts (inactive tabs stay mounted but hidden).
+const termText = () =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".xterm")]
+      .filter((x) => x.offsetParent)
+      .flatMap((x) => [...x.querySelectorAll(".xterm-rows > div")])
+      .map((d) => d.textContent)
+      .join("\n"),
+  );
 async function waitTerm(re, ms = 300000) {
   const t0 = Date.now();
   for (;;) {
@@ -41,7 +49,7 @@ async function waitTerm(re, ms = 300000) {
   }
 }
 async function type(cmd) {
-  await page.locator(".xterm-helper-textarea").focus();
+  await page.evaluate(() => [...document.querySelectorAll(".xterm")].find((x) => x.offsetParent)?.querySelector("textarea")?.focus());
   await page.keyboard.type(cmd + "\n", { delay: 5 });
 }
 
@@ -75,6 +83,52 @@ await page.getByRole("button", { name: "Run file" }).click();
 await waitTerm(/edited in monaco/);
 log("editor edit visible to guest");
 await page.screenshot({ path: ".scratch/final.png" });
+
+// a second terminal is a second, independent shell on another serial port
+await page.getByRole("button", { name: "New terminal" }).click();
+await waitTerm(/Your project is/);
+await type("export WHO=two; tty; echo W=$WHO");
+await waitTerm(/\/dev\/ttyS1[^]*W=two/);
+await page.getByRole("tab", { name: "Console" }).click();
+await type("echo W=${WHO:-none}");
+await waitTerm(/W=none/);
+log("independent terminals ok");
+
+// search in all files (Ctrl+Shift+F) and jump to the hit
+await page.keyboard.press("Control+Shift+F");
+const searchBox = page.getByLabel("Search in files");
+await searchBox.waitFor();
+await searchBox.fill("created in bash");
+const hit = page.getByTitle("/from-bash.txt:1");
+await hit.waitFor({ timeout: 5000 });
+await hit.click();
+await page.getByRole("tab", { name: /from-bash\.txt/ }).waitFor();
+log("project search ok");
+
+// zip export, then import of the same archive
+await page.getByRole("tab", { name: "Files" }).click();
+const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Export zip" }).click()]);
+const zipPath = ".scratch/exported.zip";
+await download.saveAs(zipPath);
+const head = (await import("node:fs")).readFileSync(zipPath).subarray(0, 2).toString();
+if (head !== "PK") throw new Error("exported file is not a zip");
+await page.locator('input[type=file]').setInputFiles(zipPath);
+await page.getByText(/Imported \d+ files/).waitFor({ timeout: 5000 });
+log("zip export/import ok");
+
+// keyboard navigation in the file tree: Home, Down, F2 opens the rename box, Escape closes it
+await page.getByRole("tree", { name: "Project files" }).focus();
+await page.keyboard.press("Home");
+await page.keyboard.press("ArrowDown");
+await page.keyboard.press("F2");
+await page.locator("[role=tree] input").waitFor({ timeout: 3000 });
+await page.keyboard.press("Escape");
+log("explorer keyboard ok");
+
+await page.getByRole("tab", { name: "Search" }).click();
+await page.getByLabel("Search in files").fill("echo");
+await page.waitForTimeout(500);
+await page.screenshot({ path: ".scratch/phase3.png" });
 
 // persistence: reload the page, a fresh machine boots from the stored project
 await page.waitForTimeout(600);

@@ -16,7 +16,11 @@ const ALPINE = "https://dl-cdn.alpinelinux.org/alpine";
 const BRANCH = "v3.24";
 const MINIROOTFS = `${ALPINE}/${BRANCH}/releases/x86/alpine-minirootfs-3.24.3-x86.tar.gz`;
 const KERNEL = "https://i.copy.sh/buildroot-bzimage68.bin";
-const WANTED = ["bash", "nano", "make", "tcc", "tcc-dev", "tcc-libs-static", "musl-dev", "less", "file", "coreutils", "grep", "sed", "findutils", "util-linux-misc"];
+// The package list lives in scripts/packages.txt so it can be edited without touching this script.
+const WANTED = readFileSync(resolve(root, "scripts/packages.txt"), "utf8")
+  .split(/\r?\n/)
+  .map((l) => l.replace(/#.*/, "").trim())
+  .filter(Boolean);
 const REPOS = ["main", "community"];
 
 mkdirSync(out, { recursive: true });
@@ -149,7 +153,7 @@ put("/etc/motd", "");
 put("/etc/issue", "");
 put("/etc/inittab", [
   "::sysinit:/etc/simos-init",
-  "ttyS0::respawn:/sbin/getty -n -l /etc/simos-login 115200 ttyS0 vt100",
+  ...[0, 1, 2, 3].map((n) => `ttyS${n}::respawn:/sbin/getty -n -l /etc/simos-login 115200 ttyS${n} vt100`),
   "::ctrlaltdel:/sbin/reboot",
   "::shutdown:/bin/sync",
   "",
