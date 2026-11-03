@@ -28,7 +28,7 @@
     "test": "vitest run",
     "test:unit": "vitest run --exclude test/integration",
     "test:integration": "vitest run test/integration",
-    "build:os": "node scripts/build-rootfs.mjs",
+    "build:os": "node scripts/build-rootfs.mjs && node scripts/build-desktop.mjs",
     "e2e": "node scripts/e2e.mjs"
   },
   "dependencies": {

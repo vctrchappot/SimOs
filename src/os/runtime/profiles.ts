@@ -71,6 +71,33 @@ export function alpineProfile(base = "/os"): OSProfile {
   };
 }
 
+/**
+ * Alpine's own kernel (linux-virt) with a framebuffer console and an X desktop. The kernel needs an initramfs
+ * (scripts/build-desktop.mjs) to load the 9p and display drivers before it can mount the shared root filesystem.
+ */
+export function alpineDesktopProfile(base = "/os"): OSProfile {
+  const b = base.replace(/\/$/, "");
+  return {
+    ...alpineProfile(base),
+    id: "alpine-desktop",
+    name: "Alpine Linux (graphics)",
+    description: "Alpine's Linux 6.18 kernel with a framebuffer and an X desktop (twm, xterm), on an x86 emulator.",
+    memoryMB: 384,
+    cmdline: `${KERNEL_CMDLINE} simos.desktop=1`,
+    assets: {
+      bzimage: `${b}/desktop/vmlinuz`,
+      initrd: `${b}/desktop/initramfs.gz`,
+      rootfs: { manifest: `${b}/alpine/fs.json`, baseUrl: `${b}/alpine/blobs/` },
+    },
+  };
+}
+
+export type SystemId = "alpine" | "alpine-desktop";
+
+export function profileFor(system: SystemId, base = "/os"): OSProfile {
+  return system === "alpine-desktop" ? alpineDesktopProfile(base) : alpineProfile(base);
+}
+
 /** Minimal Buildroot Linux (busybox only), used by the fast automated tests. */
 export function buildrootProfile(bzimageUrl: string): OSProfile {
   return {

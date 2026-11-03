@@ -1,6 +1,6 @@
 import type { BareFromWorker, BareToWorker } from "./baremetal.worker";
 import type { DebugSnapshot } from "./debugger";
-import type { DisplayFrame } from "./display";
+import type { AbsolutePointer, DisplayFrame } from "./display";
 import type { RuntimeStatus } from "./types";
 
 /** Main-thread handle to a bare-metal machine running in its own worker. */
@@ -135,8 +135,8 @@ export class BareMetalRuntime {
   sendKeys(codes: number[]) {
     if (this.status === "running") this.send({ t: "keys", codes });
   }
-  sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean]) {
-    if (this.status === "running") this.send({ t: "mouse", dx, dy, buttons });
+  sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean], abs?: AbsolutePointer) {
+    if (this.status === "running") this.send({ t: "mouse", dx, dy, buttons, abs });
   }
   sendSerial(data: Uint8Array) {
     if (this.status === "running") this.send({ t: "serial-in", data });

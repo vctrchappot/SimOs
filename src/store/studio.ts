@@ -4,7 +4,8 @@ import { create } from "zustand";
 import { BareMetalRuntime } from "@/os/runtime/baremetal-runtime";
 import { createBrowserRuntime } from "@/os/runtime/create-runtime";
 import { DEFAULT_NETWORK, parseNetworkConfig, type NetworkConfig } from "@/os/runtime/network";
-import { defaultProfile } from "@/os/runtime/profiles";
+import { defaultProfile, profileFor, type SystemId } from "@/os/runtime/profiles";
+import type { OSProfile } from "@/os/runtime/types";
 import { TERMINAL_COUNT, type RuntimeStatus } from "@/os/runtime/types";
 import { Studio } from "@/os/studio";
 import { isBootImage } from "@/os/runtime/baremetal";
@@ -18,6 +19,15 @@ export const DISPLAY_TAB = -1;
 
 const TABS_KEY = "simos.tabs.v1";
 const NETWORK_KEY = "simos.network.v1";
+const SYSTEM_KEY = "simos.system.v1";
+
+function loadSystem(): SystemId {
+  try {
+    return localStorage.getItem(SYSTEM_KEY) === "alpine-desktop" ? "alpine-desktop" : "alpine";
+  } catch {
+    return "alpine";
+  }
+}
 
 function loadNetwork(): NetworkConfig {
   try {
@@ -61,6 +71,11 @@ interface StudioState {
   terminals: number[];
   activeTerminal: number;
 
+  /** Which Linux system boots: the text one or the one with a framebuffer and an X desktop. */
+  system: SystemId;
+  profile: OSProfile;
+  /** Switches the system. The page reloads, because the machine is built around its kernel. */
+  setSystem(system: SystemId): void;
   /** Network for the next boot (off by default). */
   network: NetworkConfig;
   /** The network the running machine booted with, if any is running. */
@@ -152,6 +167,16 @@ export const useStudio = create<StudioState>((set, get) => {
     error: null,
     notice: null,
     network: { ...DEFAULT_NETWORK },
+    system: "alpine",
+    profile: defaultProfile,
+    setSystem(system) {
+      try {
+        localStorage.setItem(SYSTEM_KEY, system);
+      } catch {
+        /* storage unavailable */
+      }
+      location.reload();
+    },
     bare: null,
     bareStatus: "stopped",
     bareLog: "",
@@ -250,7 +275,12 @@ export const useStudio = create<StudioState>((set, get) => {
     async init() {
       if (initStarted) return;
       initStarted = true;
-      const runtime = createBrowserRuntime(defaultProfile);
+      const system = loadSystem();
+      const profile = profileFor(system);
+      set({ system, profile });
+      const runtime = createBrowserRuntime(profile);
+      // The graphics system boots into its desktop, so show the screen as soon as the OS is up.
+      if (system === "alpine-desktop") runtime.onReady(() => set({ displaySource: "linux", activeTerminal: DISPLAY_TAB }));
       const studio = new Studio({
         runtime,
         store: new IdbProjectStore("simos-project"),

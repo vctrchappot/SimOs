@@ -4,7 +4,7 @@
  */
 import { Breakpoints, readRegisters, type CpuLike, type DebugSnapshot } from "./debugger";
 import { decode, nextAddresses, type StepContext } from "./x86";
-import { DisplayAdapter, type DisplayFrame } from "./display";
+import { DisplayAdapter, type AbsolutePointer, type DisplayFrame } from "./display";
 import type { RuntimeStatus } from "./types";
 import type { V86Environment } from "./v86-runtime";
 
@@ -391,8 +391,9 @@ export class BareMetalMachine {
     this.queuedKeys = [];
     for (const code of codes) this.emulator?.bus.send("keyboard-code", code);
   }
-  sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean]) {
+  sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean], abs?: AbsolutePointer) {
     if (this.status !== "running" || this.paused || this.stepping) return;
+    if (abs) this.emulator?.bus.send("mouse-absolute", [abs.x, abs.y, abs.width, abs.height]);
     if (dx || dy) this.emulator?.bus.send("mouse-delta", [dx, -dy]);
     this.emulator?.bus.send("mouse-click", buttons);
   }

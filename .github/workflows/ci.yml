@@ -22,7 +22,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .cache
-          key: os-image-${{ hashFiles('scripts/build-rootfs.mjs', 'scripts/packages.txt') }}
+          key: os-image-${{ hashFiles('scripts/*.mjs', 'scripts/lib/*.mjs', 'scripts/packages*.txt') }}
       - run: npm run build:os
 
       # Unit tests plus integration tests that boot real Linux inside Node.

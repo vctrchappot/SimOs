@@ -2,6 +2,7 @@
 // Hosts a bare-metal machine off the main thread (see baremetal.ts).
 import { BareMetalMachine } from "./baremetal";
 import type { DebugSnapshot } from "./debugger";
+import type { AbsolutePointer } from "./display";
 import type { DisplayFrame } from "./display";
 import { browserEnvironment } from "./browser";
 import type { RuntimeStatus } from "./types";
@@ -13,7 +14,7 @@ export type BareToWorker =
   | { t: "inspect"; id: number; memory?: { addr: number; length: number }; code?: number }
   | { t: "display-watch"; on: boolean }
   | { t: "keys"; codes: number[] }
-  | { t: "mouse"; dx: number; dy: number; buttons: [boolean, boolean, boolean] }
+  | { t: "mouse"; dx: number; dy: number; buttons: [boolean, boolean, boolean]; abs?: AbsolutePointer }
   | { t: "serial-in"; data: Uint8Array };
 
 export type BareFromWorker =
@@ -50,7 +51,7 @@ self.onmessage = (ev: MessageEvent<BareToWorker>) => {
       machine.sendKeys(msg.codes);
       break;
     case "mouse":
-      machine.sendMouse(msg.dx, msg.dy, msg.buttons);
+      machine.sendMouse(msg.dx, msg.dy, msg.buttons, msg.abs);
       break;
     case "debug":
       void (msg.op === "pause" ? machine.pause() : msg.op === "step" ? machine.step() : machine.resume());

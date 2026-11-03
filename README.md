@@ -23,6 +23,11 @@ Nothing in the terminal is simulated: commands are executed by the guest's own `
 - **Keyboard-driven file tree:** arrows, Enter, F2 (rename), Delete (press twice to confirm).
 - **Optional networking** (off by default, toolbar *Network*): the OS gets a real virtio network card, DHCP and DNS.
   Choose *Browser fetch* (plain HTTP via your browser) or a *Wisp relay* you run yourself (TCP/DNS).
+- **A graphical Linux.** *System > Alpine Linux (graphics)* (top left) boots Alpine's own kernel (6.18) with a
+  framebuffer, through a small initramfs that loads the 9p and display drivers (`scripts/build-desktop.mjs`), and
+  starts an X desktop (twm and xterm) that appears on the Display tab. The guest's VMware-style mouse takes
+  absolute positions, so the pointer just follows yours. Needs about 100 MB more for the X packages
+  (`SIMOS_NO_DESKTOP=1 npm run build:os` skips them).
 - **Boot your own operating system.** *Boot image* starts a bare PC (BIOS, VGA, keyboard, serial port, no Linux)
   from a disk image in your project. The template has a 512-byte OS in `boot/boot.asm`; build it with `nasm`
   in the Linux terminal (`cd boot && make`) and boot it, with a serial log below the screen.
@@ -88,8 +93,8 @@ Not simulated but constrained by the platform, so know the limits:
   sends no CORS headers; HTTPS needs the relay). The image is fixed at build time; add packages by
   adding them to `scripts/packages.txt` and running `npm run build:os` again.
 * **The display follows the physical keys** you press and the guest uses a US layout (`loadkmap` can change
-  that). The bundled kernel has no framebuffer or DRM driver, so Linux itself only draws the text console;
-  graphics need a kernel with `vesafb`/`bochs-drm` or your own bootable system.
+  that). The default (text) system's kernel has no framebuffer; the graphics system has one, at a fixed
+  1024x768, and runs noticeably slower because X is a lot to emulate.
 * **32-bit x86 (i686)** guest, 256 MB RAM.
 * **Persistence covers the project directory** (`~/project`), not the rest of the OS. Installing
   or changing files outside `~/project` is lost on Stop/Restart. This is intentional: the OS image
@@ -165,7 +170,7 @@ the OS image by `npm run build:os`), so the studio works offline after the first
 Done: Phase 1 (editable OS overlay and boot services, Run file, visible sync errors and conflict notices),
 Phase 2 (ignore rules, cheaper change detection, emulator in a Web Worker, CI) and Phase 3 (terminals,
 project search, zip import/export, keyboard navigation, editable package list), optional guest networking
-the display bare-metal boot of your own images and a debugger for them.
+the display bare-metal boot of your own images a debugger for them and a graphical Linux with an X desktop.
 
 Deliberately not done: *fast resume* from a saved VM state. Boot takes about 7 s, while a saved state
 would be hundreds of megabytes per project and tied to one exact image version.
@@ -176,7 +181,9 @@ Phase 5 added bare-metal boot of your own disk images (nasm and binutils are in 
 
 Phase 6 added the bare-metal debugger, with an x86 decoder for disassembly and single-stepping.
 
-Next: a kernel with framebuffer support for a desktop.
+Phase 7 added the graphical system (framebuffer kernel, X desktop).
+
+Next: an AI gateway so you can drive all of this with your own coding agent (bring your own key).
 
 ## Third-party software
 

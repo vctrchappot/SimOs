@@ -26,6 +26,15 @@ export interface GraphicFrame {
 
 export type DisplayFrame = TextFrame | GraphicFrame;
 
+/** Where the pointer is on the screen, for guests whose mouse reports absolute positions (VMware-style). */
+export interface AbsolutePointer {
+  x: number;
+  y: number;
+  /** Size of the area x and y are measured in. */
+  width: number;
+  height: number;
+}
+
 /** What the VGA emulation hands over in graphics mode (matches the browser's ImageData). */
 interface ImageLike {
   data: Uint8ClampedArray;

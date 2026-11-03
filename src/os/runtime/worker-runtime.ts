@@ -1,4 +1,4 @@
-import type { DisplayFrame } from "./display";
+import type { AbsolutePointer, DisplayFrame } from "./display";
 import type { NetworkConfig } from "./network";
 import { OutputHistory } from "./output-history";
 import { endShell } from "./terminal-control";
@@ -74,8 +74,8 @@ export class WorkerRuntime implements OSRuntime {
   sendKeys(codes: number[]): void {
     if (this.status === "running") this.send({ t: "keys", codes });
   }
-  sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean]): void {
-    if (this.status === "running") this.send({ t: "mouse", dx, dy, buttons });
+  sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean], abs?: AbsolutePointer): void {
+    if (this.status === "running") this.send({ t: "mouse", dx, dy, buttons, abs });
   }
 
   history(terminal: number) {

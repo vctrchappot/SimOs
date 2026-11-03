@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { runCommandFor } from "@/os/run-command";
-import { defaultProfile } from "@/os/runtime/profiles";
 import type { RuntimeStatus } from "@/os/runtime/types";
 import { ImageMenu } from "./ImageMenu";
+import { SystemMenu } from "./SystemMenu";
 import { NetworkMenu } from "./NetworkMenu";
 import { useStudio } from "@/store/studio";
 
@@ -68,7 +68,7 @@ export function Toolbar() {
       <div className="flex items-center gap-3">
         <span className="font-semibold tracking-tight">SimOs</span>
         <span className="text-faint">/</span>
-        <span className="text-dim">{defaultProfile.name}</span>
+        <SystemMenu />
         <span className="ml-2 flex items-center gap-1.5 text-[12px] text-dim" title={statusDetail}>
           <span className={`size-1.5 rounded-full ${s.dot}`} />
           {s.label}

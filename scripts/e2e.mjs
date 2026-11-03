@@ -211,6 +211,23 @@ await waitTerm(/Your project is/);
 await type("cat from-bash.txt; tail -1 hello.sh");
 await waitTerm(/created in bash[^]*edited in monaco/);
 log("project recovered after reload");
+// the graphics system: Alpine's own kernel with a framebuffer and an X desktop, shown on the Display tab
+await page.evaluate(() => localStorage.setItem("simos.system.v1", "alpine-desktop"));
+await page.reload();
+const desk = page.getByLabel("Machine display");
+await desk.waitFor({ state: "visible", timeout: 300000 }); // the Display tab opens by itself once the OS is up
+await page.waitForFunction(
+  () => {
+    const c = document.querySelector('canvas[aria-label="Machine display"]');
+    if (!c || c.width !== 1024) return false;
+    const [r, g, b] = c.getContext("2d").getImageData(900, 700, 1, 1).data; // the desktop background
+    return r === 0x1c && g === 0x2b && b === 0x3a;
+  },
+  null,
+  { timeout: 240000 },
+);
+await page.screenshot({ path: ".scratch/desktop.png" });
+log("graphics system: X desktop is painted on the framebuffer display (keyboard/mouse into X is covered by the Node integration test only)");
 await browser.close();
 log("PASS");
 server?.kill();

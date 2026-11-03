@@ -1,4 +1,4 @@
-import type { DisplayFrame } from "./display";
+import type { AbsolutePointer, DisplayFrame } from "./display";
 import type { OSProfile, RuntimeStatus } from "./types";
 
 export type FsTarget = "project" | "root";
@@ -13,7 +13,7 @@ export type ToWorker =
   | { t: "resize"; cols: number; rows: number; terminal: number }
   | { t: "display-watch"; on: boolean }
   | { t: "keys"; codes: number[] }
-  | { t: "mouse"; dx: number; dy: number; buttons: [boolean, boolean, boolean] }
+  | { t: "mouse"; dx: number; dy: number; buttons: [boolean, boolean, boolean]; abs?: AbsolutePointer }
   | { t: "fs"; id: number; target: FsTarget; method: FsMethod; args: unknown[] };
 
 /** Worker -> main thread. */

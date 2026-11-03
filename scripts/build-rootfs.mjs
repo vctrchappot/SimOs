@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
+import { download as fetchCached, tarEntries } from "./lib/tar.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(root, "public/os");
@@ -17,61 +18,19 @@ const BRANCH = "v3.24";
 const MINIROOTFS = `${ALPINE}/${BRANCH}/releases/x86/alpine-minirootfs-3.24.3-x86.tar.gz`;
 const KERNEL = "https://i.copy.sh/buildroot-bzimage68.bin";
 // The package list lives in scripts/packages.txt so it can be edited without touching this script.
-const WANTED = readFileSync(resolve(root, "scripts/packages.txt"), "utf8")
-  .split(/\r?\n/)
-  .map((l) => l.replace(/#.*/, "").trim())
-  .filter(Boolean);
+const DESKTOP = !process.env.SIMOS_NO_DESKTOP; // the X desktop adds about 100 MB of downloads
+const readList = (file) =>
+  readFileSync(resolve(root, file), "utf8")
+    .split(/\r?\n/)
+    .map((l) => l.replace(/#.*/, "").trim())
+    .filter(Boolean);
+const WANTED = [...readList("scripts/packages.txt"), ...(DESKTOP ? readList("scripts/packages-desktop.txt") : [])];
 const REPOS = ["main", "community"];
 
 mkdirSync(out, { recursive: true });
 mkdirSync(cache, { recursive: true });
 mkdirSync(resolve(out, "alpine/blobs"), { recursive: true });
-
-async function download(url, name) {
-  const file = resolve(cache, name);
-  if (existsSync(file)) return readFileSync(file);
-  console.log("download", url);
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url}: ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  writeFileSync(file, buf);
-  return buf;
-}
-
-/** Minimal tar reader: ustar + GNU long names; skips pax extended headers. */
-function* tarEntries(buf) {
-  let off = 0;
-  let longName = null;
-  const str = (a, b) => buf.toString("utf8", a, b).replace(/\0.*$/s, "");
-  while (off + 512 <= buf.length) {
-    if (buf[off] === 0) {
-      off += 512;
-      continue;
-    }
-    let name = str(off, off + 100);
-    const mode = parseInt(str(off + 100, off + 108), 8) || 0;
-    const uid = parseInt(str(off + 108, off + 116), 8) || 0;
-    const gid = parseInt(str(off + 116, off + 124), 8) || 0;
-    const size = parseInt(str(off + 124, off + 136), 8) || 0;
-    const mtime = parseInt(str(off + 136, off + 148), 8) || 0;
-    const type = String.fromCharCode(buf[off + 156] || 48);
-    const link = str(off + 157, off + 257);
-    const prefix = str(off + 345, off + 500);
-    if (prefix) name = `${prefix}/${name}`;
-    const data = buf.subarray(off + 512, off + 512 + size);
-    off += 512 + Math.ceil(size / 512) * 512;
-    if (type === "L") {
-      longName = data.toString("utf8").replace(/\0.*$/s, "");
-      continue;
-    }
-    if (type === "x" || type === "g") continue;
-    if (longName) {
-      name = longName;
-      longName = null;
-    }
-    yield { name, mode, uid, gid, size, mtime, type, link, data };
-  }
-}
+const download = (url, name) => fetchCached(cache, url, name);
 
 /** Virtual filesystem assembled from tarballs. */
 const tree = new Map(); // path -> {kind, mode, uid, gid, mtime, data?, target?}
@@ -207,6 +166,11 @@ for svc in /etc/rc.d/*; do
   echo "[simos] starting $name"
   if [ -x "$svc" ]; then "$svc"; else . "$svc"; fi || echo "[simos] $name failed with status $?"
 done
+# The graphics system (see scripts/build-desktop.mjs) starts the X desktop in the background.
+if grep -q simos.desktop=1 /proc/cmdline && [ -x /usr/local/bin/simos-desktop ]; then
+  echo "[simos] starting the desktop"
+  /usr/local/bin/simos-desktop >/tmp/simos-desktop.log 2>&1 &
+fi
 echo "[simos] init: ready"
 `,
   0o755,
@@ -222,6 +186,78 @@ alias grep='grep --color=auto'
 );
 put("/root/.bash_profile", "[ -f ~/.bashrc ] && . ~/.bashrc\n");
 put("/etc/profile.d/color.sh", "export TERM=${TERM:-xterm-256color}\n");
+
+if (DESKTOP) {
+  put(
+    "/usr/local/bin/simos-desktop",
+    `#!/bin/sh
+# Starts an X desktop (twm and an xterm) on the framebuffer. Needs the graphics system: /dev/fb0 comes from its kernel.
+if [ ! -e /dev/fb0 ]; then
+  echo "simos-desktop: there is no framebuffer (/dev/fb0). Choose System > Alpine (graphics) in the toolbar and restart." >&2
+  exit 1
+fi
+# No udev here, so find the keyboard and mouse event devices ourselves.
+kbd=""; mouse=""
+for d in /sys/class/input/event*; do
+  name=$(cat "$d/device/name" 2>/dev/null)
+  case "$name" in
+    *eyboard*) [ -z "$kbd" ] && kbd=/dev/input/\${d##*/} ;;
+    *ouse*|*ointer*) [ -z "$mouse" ] && mouse=/dev/input/\${d##*/} ;;
+  esac
+done
+[ -n "$kbd" ] || { echo "simos-desktop: no keyboard found" >&2; exit 1; }
+cat > /tmp/xorg.conf <<CONF
+Section "ServerFlags"
+  Option "AutoAddDevices" "false"
+  Option "AutoEnableDevices" "false"
+  Option "DontVTSwitch" "true"
+EndSection
+Section "InputDevice"
+  Identifier "kbd"
+  Driver "evdev"
+  Option "Device" "$kbd"
+  Option "XkbLayout" "us"
+EndSection
+Section "InputDevice"
+  Identifier "mouse"
+  Driver "evdev"
+  Option "Device" "\${mouse:-/dev/input/event1}"
+EndSection
+Section "Device"
+  Identifier "fb"
+  Driver "fbdev"
+  Option "fbdev" "/dev/fb0"
+EndSection
+Section "Monitor"
+  Identifier "monitor"
+EndSection
+Section "Screen"
+  Identifier "screen"
+  Device "fb"
+  Monitor "monitor"
+EndSection
+Section "ServerLayout"
+  Identifier "layout"
+  Screen "screen"
+  InputDevice "kbd" "CoreKeyboard"
+  InputDevice "mouse" "CorePointer"
+EndSection
+CONF
+mkdir -p /tmp/.X11-unix
+exec xinit /etc/X11/simos-xinitrc -- /usr/bin/Xorg :0 vt7 -noreset -nolisten tcp -config /tmp/xorg.conf -logfile /tmp/Xorg.0.log
+`,
+    0o755,
+  );
+  put(
+    "/etc/X11/simos-xinitrc",
+    `#!/bin/sh
+xsetroot -solid '#1c2b3a'
+xterm -fn fixed -geometry 80x24+30+30 -bg black -fg white &
+exec twm
+`,
+    0o755,
+  );
+}
 
 // 4. Emit blobs + manifest.
 const blobDir = resolve(out, "alpine/blobs");

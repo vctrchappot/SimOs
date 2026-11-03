@@ -25,6 +25,6 @@ export type { GuestFS, GuestStat, OSProfile, OSRuntime, RuntimeStatus } from "..
 export { V86Runtime, type V86Environment } from "../runtime/v86-runtime";
 export { WorkerRuntime } from "../runtime/worker-runtime";
 export { V86GuestFS } from "../runtime/v86-guest-fs";
-export { alpineProfile, buildrootProfile, defaultProfile, READY_MARKER } from "../runtime/profiles";
+export { alpineDesktopProfile, alpineProfile, buildrootProfile, defaultProfile, profileFor, READY_MARKER } from "../runtime/profiles";
 export { applyOverlay, OVERLAY_DIR } from "../overlay";
 export { PROJECT_TEMPLATE } from "../template";

@@ -49,3 +49,12 @@ export function makeStudio(profile: OSProfile, dbName: string, template: Record<
   }
   return { studio, runtime, sh, transcript: () => output, bootLog: () => all };
 }
+
+// The emulator hands pixels over as ImageData, which Node doesn't have.
+(globalThis as { ImageData?: unknown }).ImageData ??= class {
+  constructor(
+    public data: Uint8ClampedArray,
+    public width: number,
+    public height: number,
+  ) {}
+};

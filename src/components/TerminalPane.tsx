@@ -3,7 +3,6 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
-import { defaultProfile } from "@/os/runtime/profiles";
 import { TERMINAL_COUNT } from "@/os/runtime/types";
 import { DisplayView } from "./DisplayView";
 import { DISPLAY_TAB, useStudio } from "@/store/studio";
@@ -14,6 +13,7 @@ const RESET = "\x1b[0m";
 /** One xterm view bound to one serial console of the guest. */
 function TerminalView({ index, active }: { index: number; active: boolean }) {
   const runtime = useStudio((s) => s.studio)!.runtime;
+  const profileName = useStudio((s) => s.profile.name);
   const host = useRef<HTMLDivElement>(null);
   const refit = useRef<() => void>(() => {});
   const focus = useRef<() => void>(() => {});
@@ -67,7 +67,7 @@ function TerminalView({ index, active }: { index: number; active: boolean }) {
       if (status === "booting" && last !== "booting") {
         term.reset();
         if (index === 0) {
-          note(`Powering on ${defaultProfile.name}. System files are fetched on demand, so the first boot takes longer.`);
+          note(`Powering on ${profileName}. System files are fetched on demand, so the first boot takes longer.`);
           term.write("\r\n");
         }
       } else if (index === 0 && status === "stopped") note("Machine powered off. Press Power on to boot it again.");
@@ -84,7 +84,7 @@ function TerminalView({ index, active }: { index: number; active: boolean }) {
       observer.disconnect();
       term.dispose();
     };
-  }, [runtime, index]);
+  }, [runtime, index, profileName]);
 
   useEffect(() => {
     if (!active) return;

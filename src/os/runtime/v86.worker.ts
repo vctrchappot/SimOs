@@ -68,7 +68,7 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
       runtime?.sendKeys(msg.codes);
       break;
     case "mouse":
-      runtime?.sendMouse(msg.dx, msg.dy, msg.buttons);
+      runtime?.sendMouse(msg.dx, msg.dy, msg.buttons, msg.abs);
       break;
     case "fs":
       void handleFs(msg);

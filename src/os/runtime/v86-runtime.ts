@@ -1,4 +1,4 @@
-import { DisplayAdapter, type DisplayFrame } from "./display";
+import { DisplayAdapter, type AbsolutePointer, type DisplayFrame } from "./display";
 import { networkDevice, type NetworkConfig } from "./network";
 import { OutputHistory } from "./output-history";
 import { endShell } from "./terminal-control";
@@ -110,8 +110,9 @@ export class V86Runtime implements OSRuntime {
     for (const code of codes) this.emulator.bus.send("keyboard-code", code);
   }
 
-  sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean]): void {
+  sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean], abs?: AbsolutePointer): void {
     if (!this.emulator || this.status !== "running") return;
+    if (abs) this.emulator.bus.send("mouse-absolute", [abs.x, abs.y, abs.width, abs.height]);
     if (dx || dy) this.emulator.bus.send("mouse-delta", [dx, -dy]);
     this.emulator.bus.send("mouse-click", buttons);
   }
@@ -158,6 +159,7 @@ export class V86Runtime implements OSRuntime {
         options.filesystem = {};
       }
       options.bzimage = { url: assets.bzimage };
+      if (assets.initrd) options.initrd = { url: assets.initrd };
       const net = networkDevice(this.profile.network);
       if (net) {
         options.net_device = net;

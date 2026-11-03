@@ -1,5 +1,5 @@
 /** Contracts between the studio and whatever machine is running the OS. */
-import type { DisplayFrame } from "./display";
+import type { AbsolutePointer, DisplayFrame } from "./display";
 import type { NetworkConfig } from "./network";
 
 /** Serial consoles the machine offers (ttyS0..ttyS3). Each runs its own login shell. */
@@ -47,7 +47,7 @@ export interface OSRuntime {
   /** Keyboard scancodes (set 1) for the guest's PS/2 keyboard. */
   sendKeys(codes: number[]): void;
   /** Relative mouse movement and button state for the guest's PS/2 mouse. */
-  sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean]): void;
+  sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean], abs?: AbsolutePointer): void;
   /** Everything a console printed recently, so a view opened later can catch up. */
   history(terminal: number): Uint8Array;
   /** Ends the shell on a terminal; init starts a fresh login shell there. Terminal 0 is the system console. */
@@ -86,6 +86,8 @@ export interface OSProfile {
   assets: {
     /** Linux kernel image (bzImage). */
     bzimage: string;
+    /** Initial RAM disk (gzip cpio) that finishes bringing the machine up, if the kernel needs one. */
+    initrd?: string;
     /** Root filesystem manifest (fs.json) and the URL prefix of its file blobs, served on demand. */
     rootfs?: { manifest: string; baseUrl: string };
   };

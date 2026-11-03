@@ -118,19 +118,29 @@ export function DisplayView({ active }: { active: boolean }) {
     runtime.sendKeys(codes);
   };
 
+  /**
+   * Sends the pointer to the guest both ways, like a real mouse adapter would: movement since the last event (for a
+   * PS/2 mouse) and the position on the screen (for guests with a VMware-style absolute mouse, like Linux here).
+   * The canvas letterboxes the picture, so positions are measured inside the picture, not the element.
+   */
   const pointer = (e: React.MouseEvent<HTMLCanvasElement>, pressed: boolean | null) => {
     const el = canvas.current!;
     if (pressed !== null) {
       const i = e.button === 0 ? 0 : e.button === 2 ? 2 : 1;
       buttons.current[i] = pressed;
-      if (pressed && graphic.current && document.pointerLockElement !== el) {
-        // The guest sees a relative mouse; capture the pointer so it can move without leaving the screen (Esc frees it).
-        void el.requestPointerLock?.();
-      }
-      runtime.sendMouse(0, 0, [...buttons.current]);
-    } else if (document.pointerLockElement === el) {
-      runtime.sendMouse(e.movementX, e.movementY, [...buttons.current]);
     }
+    const box = el.getBoundingClientRect();
+    const scale = Math.min(box.width / el.width, box.height / el.height) || 1;
+    const left = box.left + (box.width - el.width * scale) / 2;
+    const top = box.top + (box.height - el.height * scale) / 2;
+    const x = Math.max(0, Math.min(el.width, (e.clientX - left) / scale));
+    const y = Math.max(0, Math.min(el.height, (e.clientY - top) / scale));
+    runtime.sendMouse(pressed === null ? e.movementX / scale : 0, pressed === null ? e.movementY / scale : 0, [...buttons.current], {
+      x,
+      y,
+      width: el.width,
+      height: el.height,
+    });
   };
 
   const logRef = useRef<HTMLPreElement>(null);
@@ -172,7 +182,7 @@ export function DisplayView({ active }: { active: boolean }) {
         onMouseUp={(e) => pointer(e, false)}
         onMouseMove={(e) => pointer(e, null)}
         onContextMenu={(e) => e.preventDefault()}
-        className={`min-h-0 w-full flex-1 object-contain outline-none ${live ? "" : "invisible"}`}
+        className={`min-h-0 w-full flex-1 object-contain outline-none ${live ? "" : "invisible"} ${focused && graphic.current ? "cursor-none" : ""}`}
         style={{ imageRendering: "pixelated" }}
       />
       {!live ? (

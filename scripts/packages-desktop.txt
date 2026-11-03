@@ -1,0 +1,12 @@
+# Alpine packages for the graphical profile (an X server on the framebuffer, a tiny window manager, a terminal).
+# Installed into the same image as packages.txt, so the text profile just ignores them.
+# Skip them with `SIMOS_NO_DESKTOP=1 npm run build:os`: that saves about 100 MB of downloads.
+xorg-server
+xf86-video-fbdev
+xf86-input-evdev
+xinit
+twm
+xterm
+xsetroot
+font-misc-misc
+font-cursor-misc
