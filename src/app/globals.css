@@ -1,0 +1,55 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@xterm/xterm/css/xterm.css";
+
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  --color-bg: #0c0c0e;
+  --color-panel: #111113;
+  --color-raised: #18181b;
+  --color-hover: #1f1f23;
+  --color-line: #232327;
+  --color-fg: #e4e4e7;
+  --color-dim: #a1a1aa;
+  --color-faint: #71717a;
+  --color-accent: #7c9cff;
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a2f transparent;
+}
+
+button {
+  cursor: default;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.xterm {
+  height: 100%;
+  padding: 8px 0 0 12px;
+}
+
+.xterm-viewport {
+  background: transparent !important;
+}

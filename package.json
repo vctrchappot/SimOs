@@ -1,0 +1,58 @@
+{
+  "name": "simos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser-based OS development studio: edit a real Linux system (kernel, init, bash) on the left, run it on the right.",
+  "license": "MIT",
+  "keywords": [
+    "operating-system",
+    "os-dev",
+    "linux",
+    "bash",
+    "browser",
+    "v86",
+    "webassembly",
+    "nextjs",
+    "monaco",
+    "xterm"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "postinstall": "node scripts/copy-assets.mjs",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run --exclude test/integration",
+    "test:integration": "vitest run test/integration",
+    "build:os": "node scripts/build-rootfs.mjs",
+    "e2e": "node scripts/e2e.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@monaco-editor/react": "^4.7.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "monaco-editor": "^0.57.0",
+    "next": "^16.4.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "v86": "^0.5.473",
+    "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.4",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "fake-indexeddb": "^6.2.7",
+    "playwright-core": "^1.64.1",
+    "postcss": "^8.5.32",
+    "tailwindcss": "^4.3.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
