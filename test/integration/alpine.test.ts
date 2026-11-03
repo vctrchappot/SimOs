@@ -9,6 +9,8 @@ import { scancodes } from "@/os/keyboard";
 import type { DisplayFrame } from "@/os/runtime/display";
 import { alpineProfile } from "@/os/runtime/profiles";
 import { PROJECT_TEMPLATE } from "@/os/template";
+import { decode } from "@/os/runtime/x86";
+import { SAMPLES_16, SAMPLES_32 } from "./x86-samples";
 import { BareMetalMachine } from "@/os/runtime/baremetal";
 import { makeStudio, nodeEnv, root } from "./harness";
 
@@ -149,6 +151,40 @@ describe.skipIf(!built)("Alpine Linux with bash", () => {
       expect(serial).toBe("built with nasm");
     } finally {
       await machine.shutdown();
+    }
+  }, 120_000);
+
+  it("decodes instructions with the same boundaries as nasm, in 16- and 32-bit code", async () => {
+    for (const [name, src, bits] of [["s16", SAMPLES_16, 16], ["s32", SAMPLES_32, 32]] as const) {
+      studio.fs.writeFile(`/${name}.asm`, src, "editor");
+      await studio.settle();
+      const built = await sh(`nasm -f bin ${name}.asm -o ${name}.bin -l ${name}.lst && cat ${name}.lst`, 60_000);
+      expect(built.code, built.out).toBe(0);
+      await studio["sync"]!.poll();
+      const bin = studio.fs.readFile(`/${name}.bin`);
+      // nasm's own idea of where instructions start and how long they are
+      const expected = new Map<number, string>();
+      for (const m of built.out.matchAll(/^\s*\d+ ([0-9A-F]{8}) ([0-9A-F]+)(-?)\s*(.*)$/gm)) {
+        if (/^(db|times|bits)/i.test(m[4])) continue;
+        expected.set(parseInt(m[1], 16), m[2]);
+      }
+      expect(expected.size, built.out.slice(0, 1500)).toBeGreaterThan(60);
+      const read = (addr: number, n: number) => bin.slice(addr, Math.min(bin.length, addr + n));
+      const problems: string[] = [];
+      let at = 0;
+      let previousWasLong = false; // nasm's listing cuts long instructions off and continues on another line
+      while (at < bin.length) {
+        const insn = decode(read, at, { bits, csBase: 0 })!;
+        const hexBytes = insn.bytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
+        const want = expected.get(at);
+        if (want === undefined) {
+          if (!previousWasLong) problems.push(`${at.toString(16)}: decoded ${insn.text} (${hexBytes}) where nasm has no instruction`);
+        } else if (!hexBytes.startsWith(want)) problems.push(`${at.toString(16)}: ${insn.text}: got ${hexBytes}, nasm ${want}`);
+        previousWasLong = insn.length > 9;
+        at += insn.length;
+      }
+      expect(problems, `${name}: ${problems.join(" | ")}`).toEqual([]);
+      expect(at).toBe(bin.length);
     }
   }, 120_000);
 

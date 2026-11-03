@@ -87,6 +87,7 @@ interface StudioState {
   setBreakpoints(addresses: number[]): void;
   pauseImage(): void;
   resumeImage(): void;
+  stepImage(): void;
 
   sidebar: "files" | "search";
   /** A search hit the editor should scroll to (nonce makes repeated clicks on one hit work). */
@@ -181,6 +182,7 @@ export const useStudio = create<StudioState>((set, get) => {
     },
     pauseImage: () => get().bare?.pause(),
     resumeImage: () => get().bare?.resume(),
+    stepImage: () => get().bare?.step(),
     bootedNetwork: null,
     terminals: [0],
     activeTerminal: 0,

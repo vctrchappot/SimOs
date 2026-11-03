@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { parseAddress, type DebugSnapshot, type Registers } from "@/os/runtime/debugger";
+import { parseAddress, type CodeLine, type DebugSnapshot, type Registers } from "@/os/runtime/debugger";
 import { useStudio } from "@/store/studio";
 
 const hex = (n: number, digits: number) => n.toString(16).toUpperCase().padStart(digits, "0");
 const FLAGS: Array<[string, number]> = [["CF", 0], ["PF", 2], ["AF", 4], ["ZF", 6], ["SF", 7], ["TF", 8], ["IF", 9], ["DF", 10], ["OF", 11]];
 const MEMORY_ROWS = 8;
+const CODE_LINES = 10;
 
 function RegisterTable({ r }: { r: Registers }) {
   const general: Array<[string, number]> = [["EAX", r.eax], ["ECX", r.ecx], ["EDX", r.edx], ["EBX", r.ebx], ["ESP", r.esp], ["EBP", r.ebp], ["ESI", r.esi], ["EDI", r.edi]];
@@ -45,6 +46,27 @@ function RegisterTable({ r }: { r: Registers }) {
   );
 }
 
+/** Instructions from the current one on; click a line to toggle a breakpoint on it. */
+function Disassembly({ lines, breakpoints, toggle }: { lines: CodeLine[]; breakpoints: number[]; toggle(addr: number): void }) {
+  return (
+    <div className="mb-2 font-mono text-[11px] leading-[1.35]" aria-label="Disassembly">
+      {lines.map((l, i) => (
+        <button
+          key={l.addr}
+          onClick={() => toggle(l.addr)}
+          title="Toggle breakpoint"
+          className={`flex w-full gap-2 whitespace-pre text-left hover:bg-hover ${i === 0 ? "text-fg" : "text-dim"}`}
+        >
+          <span className={breakpoints.includes(l.addr) ? "text-bad" : "text-faint"}>{breakpoints.includes(l.addr) ? "●" : i === 0 ? "▶" : " "}</span>
+          <span className="text-faint">{hex(l.addr, 4)}</span>
+          <span className="w-24 shrink-0 truncate text-faint">{l.bytes.map((b) => hex(b, 2)).join(" ")}</span>
+          <span>{l.text}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function MemoryDump({ snap }: { snap: DebugSnapshot["memory"] }) {
   if (!snap) return <p className="text-[11px] text-faint">Memory is not readable at this address.</p>;
   const rows = [];
@@ -72,7 +94,7 @@ function MemoryDump({ snap }: { snap: DebugSnapshot["memory"] }) {
 export function DebugPanel() {
   const bare = useStudio((s) => s.bare);
   const status = useStudio((s) => s.bareStatus);
-  const { breakpoints, debugPaused, debugHit, setBreakpoints, pauseImage, resumeImage } = useStudio();
+  const { breakpoints, debugPaused, debugHit, setBreakpoints, pauseImage, resumeImage, stepImage } = useStudio();
   const [snap, setSnap] = useState<DebugSnapshot | null>(null);
   const [addrText, setAddrText] = useState("0x7c00");
   const [follow, setFollow] = useState(false);
@@ -95,7 +117,7 @@ export function DebugPanel() {
         const now = await bare.inspect();
         if (now?.registers) at = now.registers.linearIp;
       }
-      const s = await bare.inspect({ addr: at, length: 16 * MEMORY_ROWS });
+      const s = await bare.inspect({ addr: at, length: 16 * MEMORY_ROWS }, CODE_LINES);
       if (alive) setSnap(s);
     };
     void refresh();
@@ -116,8 +138,8 @@ export function DebugPanel() {
 
   return (
     <div
-      className="grid shrink-0 grid-cols-[minmax(0,13rem)_1fr] gap-3 overflow-auto border-t border-line bg-bg p-3"
-      style={{ maxHeight: "16rem" }}
+      className="grid shrink-0 grid-cols-[minmax(0,19rem)_1fr] gap-3 overflow-auto border-t border-line bg-bg p-3"
+      style={{ maxHeight: "19rem" }}
       aria-label="Debugger"
     >
       <div className="min-w-0">
@@ -139,10 +161,19 @@ export function DebugPanel() {
               Pause
             </button>
           )}
+          <button
+            onClick={() => stepImage()}
+            disabled={!running || !debugPaused}
+            title="Run one instruction (calls and interrupts count as one)"
+            className="rounded border border-line px-2 py-0.5 text-[11px] text-fg hover:bg-hover disabled:opacity-35"
+          >
+            Step
+          </button>
           <span className="text-[11px] text-faint" aria-live="polite">
             {debugHit !== null ? `Stopped at breakpoint ${hex(debugHit, 4)}` : debugPaused ? "Paused" : running ? "Running" : "No image running"}
           </span>
         </div>
+        {snap?.code?.length ? <Disassembly lines={snap.code} breakpoints={breakpoints} toggle={(a) => setBreakpoints(breakpoints.includes(a) ? breakpoints.filter((b) => b !== a) : [...breakpoints, a])} /> : null}
         {snap?.registers ? <RegisterTable r={snap.registers} /> : <p className="text-[11px] text-faint">Boot an image to see registers.</p>}
       </div>
       <div className="min-w-0">
@@ -195,9 +226,9 @@ export function DebugPanel() {
             ))}
           </div>
           <p className="mt-1 text-[10px] leading-snug text-faint">
-            A breakpoint patches two bytes at that address, so put it on the start of an instruction. It stops the machine when the code gets
-            there and re-arms shortly after Continue (the emulator has no single-step). Breakpoints in the boot sector (0x7C00 to 0x7DFD)
-            also catch the very first instructions.
+            A breakpoint patches two bytes at that address, so put it on the start of an instruction (click a disassembly line to toggle one).
+            Step runs one instruction; calls and interrupts count as one. Breakpoints in the boot sector (0x7C00 to 0x7DFD) also catch the very
+            first instructions.
           </p>
         </div>
       </div>

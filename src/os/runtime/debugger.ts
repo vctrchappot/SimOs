@@ -33,6 +33,14 @@ export interface Registers {
   cr0: number;
 }
 
+/** One disassembled instruction. */
+export interface CodeLine {
+  addr: number;
+  length: number;
+  bytes: number[];
+  text: string;
+}
+
 export interface DebugSnapshot {
   paused: boolean;
   /** Address of the breakpoint that stopped the machine, if that is why it is paused. */
@@ -40,6 +48,8 @@ export interface DebugSnapshot {
   breakpoints: number[];
   registers: Registers | null;
   memory: { addr: number; data: Uint8Array } | null;
+  /** Instructions starting at the current instruction pointer (when asked for). */
+  code: CodeLine[] | null;
 }
 
 /** The slice of the emulator's CPU this module reads (v86 internals). */
@@ -50,12 +60,15 @@ export interface CpuLike {
   protected_mode: Uint8Array;
   cr: Int32Array;
   mem8: Uint8Array;
+  is_32: Uint8Array | Int32Array;
   get_eflags(): number;
   get_real_eip(): number;
   write_blob(blob: Uint8Array, offset: number): void;
 }
 
 const SPIN = Uint8Array.of(0xeb, 0xfe);
+
+const covers = (addr: number, ip: number) => ip >= addr && ip < addr + SPIN.length;
 
 export function readRegisters(cpu: CpuLike): Registers {
   const r = cpu.reg32;
@@ -164,9 +177,18 @@ export class Breakpoints {
     this.disarm(addr);
   }
 
-  /** Re-arms every released breakpoint the CPU has moved away from. */
+  /**
+   * Re-arms every released breakpoint the CPU has moved away from. The spin lock is two bytes long, so while the
+   * CPU is on the second of them (after a one-byte instruction) the breakpoint has to wait.
+   */
   rearm(linearIp: number) {
-    for (const [addr, p] of this.points) if (!p.armed && addr !== linearIp) this.arm(addr);
+    for (const [addr, p] of this.points) if (!p.armed && !covers(addr, linearIp)) this.arm(addr);
+  }
+
+  /** True if a released breakpoint is waiting for the CPU to leave its two bytes. */
+  waitingFor(linearIp: number): boolean {
+    for (const [addr, p] of this.points) if (!p.armed && covers(addr, linearIp)) return true;
+    return false;
   }
 
   get hasDisarmed(): boolean {

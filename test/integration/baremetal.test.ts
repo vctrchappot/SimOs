@@ -123,6 +123,84 @@ describe.skipIf(!hasBios)("bare-metal debugger", () => {
     expect(machine.inspect().breakpoints).toEqual([]);
   }, 60_000);
 
+  it("single-steps instructions, with disassembly, stepping over the lodsb loop body one instruction at a time", async () => {
+    await machine.shutdown();
+    let serial = "";
+    machine.onSerial((d) => (serial += new TextDecoder().decode(d)));
+    let state = { paused: false, hit: null as number | null };
+    machine.onDebugState((s) => (state = s));
+    await machine.boot({ image: bootSector("AB"), name: "boot.img", breakpoints: [0x7c00] }); // stop on the very first instruction
+    await until(() => state.paused);
+    expect(machine.inspect().registers).toMatchObject({ linearIp: 0x7c00 });
+
+    const ip = () => machine.inspect().registers!.linearIp;
+    expect(await machine.step()).toBe("stepped");
+    expect(ip()).toBe(0x7c02); // xor ax, ax
+    expect(await machine.step()).toBe("stepped");
+    expect(ip()).toBe(0x7c04); // mov ds, ax
+    expect(await machine.step()).toBe("stepped");
+    expect(ip()).toBe(0x7c07); // mov si, 0x7c19
+    expect(machine.inspect().registers!.esi).toBe(0x7c19);
+
+    const code = machine.inspect(undefined, 4).code!;
+    expect(code.map((l) => l.text)).toEqual(["lodsb", "or al, al", "je 0x7c16", "mov ah, 0xe"]);
+    expect(code.map((l) => l.addr)).toEqual([0x7c07, 0x7c08, 0x7c0a, 0x7c0c]);
+
+    await machine.step(); // lodsb
+    expect(machine.inspect().registers).toMatchObject({ linearIp: 0x7c08, esi: 0x7c1a });
+    expect(machine.inspect().registers!.eax & 0xff).toBe(0x41);
+    await machine.step(); // or al, al
+    await machine.step(); // jz (not taken)
+    expect(ip()).toBe(0x7c0c);
+    for (let i = 0; i < 4; i++) await machine.step(); // mov ah / int 10h (stepped over) / mov dx / out dx, al
+    await until(() => serial === "A"); // the serial port flushes a few milliseconds later
+    expect(ip()).toBe(0x7c14); // jmp back to the loop
+    await machine.step();
+    expect(ip()).toBe(0x7c07);
+  }, 60_000);
+
+  it("stops at a breakpoint inside a loop on every pass", async () => {
+    await machine.shutdown();
+    let serial = "";
+    machine.onSerial((d) => (serial += new TextDecoder().decode(d)));
+    let state = { paused: false, hit: null as number | null };
+    machine.onDebugState((s) => (state = s));
+    await machine.boot({ image: bootSector("ABC"), name: "boot.img", breakpoints: [0x7c07] }); // the lodsb at the top of the loop
+    const seen: string[] = [];
+    for (let pass = 0; pass < 3; pass++) {
+      await until(() => state.paused && state.hit === 0x7c07);
+      seen.push(serial);
+      state = { paused: false, hit: null };
+      await machine.resume();
+    }
+    expect(seen).toEqual(["", "A", "AB"]);
+    await until(() => state.paused && state.hit === 0x7c07); // the fourth pass reads the terminating zero
+    expect(serial).toBe("ABC");
+  }, 60_000);
+
+  it("holds keys typed while stopped until the machine runs again", async () => {
+    await machine.shutdown();
+    let serial = "";
+    machine.onSerial((d) => (serial += new TextDecoder().decode(d)));
+    let state = { paused: false, hit: null as number | null };
+    machine.onDebugState((s) => (state = s));
+    await machine.boot({ image: echoSector(), name: "boot.img", breakpoints: [0x7c04] });
+    await new Promise((r) => setTimeout(r, 2500));
+    type("KeyA");
+    await until(() => state.paused);
+    type("KeyB"); // typed while stopped at the breakpoint: delivering it would make the CPU take the keyboard interrupt
+    await new Promise((r) => setTimeout(r, 400));
+    expect(machine.inspect().registers!.linearIp).toBe(0x7c04);
+
+    state = { paused: false, hit: null };
+    await machine.resume();
+    await until(() => state.paused && state.hit === 0x7c04); // 'b' arrives after 'a' was echoed
+    expect(machine.inspect().registers!.eax & 0xff).toBe(0x62);
+    await until(() => serial === "a");
+    await machine.resume();
+    await until(() => serial === "ab");
+  }, 60_000);
+
   it("pauses and resumes on request", async () => {
     await machine.shutdown();
     let serial = "";

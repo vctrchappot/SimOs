@@ -8,9 +8,9 @@ import type { RuntimeStatus } from "./types";
 
 export type BareToWorker =
   | { t: "boot"; image: Uint8Array; name: string; memoryMB?: number; breakpoints: number[] }
-  | { t: "debug"; op: "pause" | "resume" }
+  | { t: "debug"; op: "pause" | "resume" | "step" }
   | { t: "breakpoints"; addresses: number[] }
-  | { t: "inspect"; id: number; memory?: { addr: number; length: number } }
+  | { t: "inspect"; id: number; memory?: { addr: number; length: number }; code?: number }
   | { t: "display-watch"; on: boolean }
   | { t: "keys"; codes: number[] }
   | { t: "mouse"; dx: number; dy: number; buttons: [boolean, boolean, boolean] }
@@ -53,13 +53,13 @@ self.onmessage = (ev: MessageEvent<BareToWorker>) => {
       machine.sendMouse(msg.dx, msg.dy, msg.buttons);
       break;
     case "debug":
-      void (msg.op === "pause" ? machine.pause() : machine.resume());
+      void (msg.op === "pause" ? machine.pause() : msg.op === "step" ? machine.step() : machine.resume());
       break;
     case "breakpoints":
       machine.setBreakpoints(msg.addresses);
       break;
     case "inspect":
-      post({ t: "inspect-result", id: msg.id, snapshot: machine.inspect(msg.memory) });
+      post({ t: "inspect-result", id: msg.id, snapshot: machine.inspect(msg.memory, msg.code) });
       break;
     case "serial-in":
       machine.sendSerial(msg.data);

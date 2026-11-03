@@ -3,11 +3,18 @@
  * disk image that you built. This is where a home-made operating system boots.
  */
 import { Breakpoints, readRegisters, type CpuLike, type DebugSnapshot } from "./debugger";
+import { decode, nextAddresses, type StepContext } from "./x86";
 import { DisplayAdapter, type DisplayFrame } from "./display";
 import type { RuntimeStatus } from "./types";
 import type { V86Environment } from "./v86-runtime";
 
 export type DriveKind = "cdrom" | "fda" | "hda";
+
+/** The spin lock written over code to park the CPU (`jmp $`). */
+const SPIN = Uint8Array.of(0xeb, 0xfe);
+
+/** Longest time a single step may take, for instructions that wait (BIOS keyboard calls, hlt). */
+const STEP_TIMEOUT_MS = 3000;
 
 /** A released breakpoint re-arms after this many 25 ms ticks (there is no single-step to do it sooner). */
 const REARM_TICKS = 6;
@@ -91,6 +98,7 @@ export class BareMetalMachine {
   private debugTimer: ReturnType<typeof setInterval> | null = null;
   private debugCbs = new Set<(s: DebugState) => void>();
   private breakpoints = new Breakpoints(() => this.cpu());
+  private stepping = false;
 
   constructor(private env: V86Environment) {}
 
@@ -137,14 +145,90 @@ export class BareMetalMachine {
     this.notifyDebug();
   }
 
-  async resume() {
+  async resume(): Promise<void> {
     if (this.status !== "running" || !this.paused || !this.emulator) return;
-    if (this.hit !== null) this.breakpoints.release(this.hit); // run the real instruction, not the spin lock
+    if (this.hit !== null) {
+      // Execute the instruction under the breakpoint on its own, so the breakpoint is armed again before the
+      // program can come back to it (this is what makes breakpoints in loops work).
+      const at = this.hit;
+      const result = await this.step();
+      if (result === "hit") return; // stopped again, at another breakpoint
+      if (result === "unsupported") this.breakpoints.release(at); // can't step it: run the real instruction, re-arm later
+      // After a one-byte instruction the CPU sits inside the breakpoint's two bytes; step on until it is clear of them.
+      for (let i = 0; i < 2 && result === "stepped" && this.breakpoints.waitingFor((this.cpu()?.instruction_pointer[0] ?? 0) >>> 0); i++) {
+        if ((await this.step()) !== "stepped") break;
+      }
+      if (this.hit !== null) return;
+    }
     this.hit = null;
     this.paused = false;
     this.resumedTicks = 0;
     this.notifyDebug();
     await this.emulator.run();
+    this.flushKeys();
+  }
+
+  /** Registers and memory in the shape the decoder wants. */
+  private stepContext(): StepContext | null {
+    const cpu = this.cpu();
+    if (!cpu) return null;
+    return {
+      reg: [...cpu.reg32],
+      sreg: [...cpu.sreg],
+      protectedMode: cpu.protected_mode[0] !== 0,
+      bits: cpu.is_32[0] ? 32 : 16,
+      read: (addr, length) => this.breakpoints.read(addr, length),
+    };
+  }
+
+  /**
+   * Runs exactly one instruction (calls, interrupts and repeated string operations count as one and run to
+   * completion). Possible while paused. Finds the addresses execution can reach next with the decoder, parks
+   * temporary spin locks there, and lets the CPU run until it lands on one.
+   */
+  async step(): Promise<"stepped" | "hit" | "unsupported" | "timeout"> {
+    const cpu = this.cpu();
+    const ctx = this.stepContext();
+    if (this.status !== "running" || !this.paused || !this.emulator || !cpu || !ctx) return "unsupported";
+    const ip = cpu.instruction_pointer[0] >>> 0;
+    const insn = decode(ctx.read, ip, { bits: ctx.bits, csBase: ctx.protectedMode ? 0 : ctx.sreg[1] * 16 });
+    const targets = insn && nextAddresses(insn, ctx);
+    if (!targets) return "unsupported";
+
+    if (this.hit !== null) this.breakpoints.release(this.hit);
+    const parked = new Map<number, Uint8Array>();
+    for (const t of new Set(targets)) {
+      if (this.breakpoints.hitAt(t) !== null) continue; // an armed breakpoint stops it by itself
+      parked.set(t, cpu.mem8.slice(t, t + 2));
+      cpu.write_blob(SPIN, t);
+    }
+    const wanted = new Set(targets);
+    this.stepping = true;
+    this.hit = null;
+    this.paused = false;
+    let landed = false;
+    try {
+      await this.emulator.run();
+      const deadline = Date.now() + STEP_TIMEOUT_MS;
+      while (Date.now() < deadline && this.status === "running") {
+        await new Promise((r) => setTimeout(r, 2));
+        if (wanted.has(cpu.instruction_pointer[0] >>> 0)) {
+          landed = true;
+          break;
+        }
+      }
+      if (this.status !== "running") return "timeout";
+      await this.emulator.stop();
+    } finally {
+      for (const [addr, original] of parked) cpu.write_blob(original, addr);
+      this.stepping = false;
+    }
+    const now = cpu.instruction_pointer[0] >>> 0;
+    this.breakpoints.rearm(now);
+    this.hit = this.breakpoints.hitAt(now);
+    this.paused = true;
+    this.notifyDebug();
+    return landed ? (this.hit !== null ? "hit" : "stepped") : "timeout";
   }
 
   /** Flat addresses to break at (see debugger.ts for how this works and its limits). */
@@ -154,7 +238,7 @@ export class BareMetalMachine {
   }
 
   /** Current registers, breakpoints and (optionally) a window of memory. */
-  inspect(memory?: { addr: number; length: number }): DebugSnapshot {
+  inspect(memory?: { addr: number; length: number }, codeLines = 0): DebugSnapshot {
     const cpu = this.cpu();
     const data = memory ? this.breakpoints.read(memory.addr, memory.length) : null;
     return {
@@ -163,7 +247,25 @@ export class BareMetalMachine {
       breakpoints: this.breakpoints.addresses,
       registers: cpu && this.status === "running" ? readRegisters(cpu) : null,
       memory: memory && data ? { addr: memory.addr, data } : null,
+      code: codeLines > 0 ? this.disassemble(codeLines) : null,
     };
+  }
+
+  /** Instructions from the current instruction pointer on (the unambiguous direction: x86 can't be read backwards). */
+  private disassemble(count: number): DebugSnapshot["code"] {
+    const ctx = this.stepContext();
+    const cpu = this.cpu();
+    if (!ctx || !cpu || this.status !== "running") return null;
+    const csBase = ctx.protectedMode ? 0 : ctx.sreg[1] * 16;
+    const lines: NonNullable<DebugSnapshot["code"]> = [];
+    let at = cpu.instruction_pointer[0] >>> 0;
+    for (let i = 0; i < count; i++) {
+      const insn = decode(ctx.read, at, { bits: ctx.bits, csBase });
+      if (!insn) break;
+      lines.push({ addr: insn.addr, length: insn.length, bytes: insn.bytes, text: insn.text });
+      at += insn.length;
+    }
+    return lines;
   }
 
   /** Watches for the CPU parking on a breakpoint, and re-arms released ones once it has moved on. */
@@ -171,7 +273,7 @@ export class BareMetalMachine {
     if (this.debugTimer || !this.breakpoints.addresses.length) return;
     this.debugTimer = setInterval(() => {
       const cpu = this.cpu();
-      if (!cpu || this.paused || this.hit !== null || this.status !== "running") return;
+      if (!cpu || this.paused || this.stepping || this.hit !== null || this.status !== "running") return;
       const ip = cpu.instruction_pointer[0] >>> 0;
       const hit = this.breakpoints.hitAt(ip);
       if (hit !== null) {
@@ -276,12 +378,21 @@ export class BareMetalMachine {
   sendSerial(data: Uint8Array) {
     if (this.status === "running") this.emulator?.serial_send_bytes(0, data);
   }
+  /** Keys typed while the machine is stopped wait here: delivering them would let the CPU take an interrupt and move. */
+  private queuedKeys: number[] = [];
+
   sendKeys(codes: number[]) {
     if (this.status !== "running") return;
+    if (this.paused || this.stepping) return void this.queuedKeys.push(...codes);
+    for (const code of codes) this.emulator?.bus.send("keyboard-code", code);
+  }
+  private flushKeys() {
+    const codes = this.queuedKeys;
+    this.queuedKeys = [];
     for (const code of codes) this.emulator?.bus.send("keyboard-code", code);
   }
   sendMouse(dx: number, dy: number, buttons: [boolean, boolean, boolean]) {
-    if (this.status !== "running") return;
+    if (this.status !== "running" || this.paused || this.stepping) return;
     if (dx || dy) this.emulator?.bus.send("mouse-delta", [dx, -dy]);
     this.emulator?.bus.send("mouse-click", buttons);
   }
@@ -300,6 +411,7 @@ export class BareMetalMachine {
     this.breakpoints = new Breakpoints(() => this.cpu());
     this.paused = false;
     this.hit = null;
+    this.queuedKeys = [];
     this.flushSerial();
     const emulator = this.emulator;
     this.emulator = null;

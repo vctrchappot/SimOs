@@ -176,6 +176,9 @@ await page.keyboard.type("a", { delay: 50 });
 await debug.getByText("Stopped at breakpoint 7C1A").waitFor({ timeout: 20000 });
 await debug.getByLabel("Registers").getByText(/1E61/).waitFor({ timeout: 5000 }); // ah = scancode, al = 'a'
 await page.screenshot({ path: ".scratch/debugger.png" });
+await debug.getByLabel("Disassembly").getByText("call 0x7c").first().waitFor({ timeout: 5000 }); // the instruction we stopped on
+await debug.getByRole("button", { name: "Step" }).click();
+await debug.getByLabel("Registers").getByText(/00007C1D/).waitFor({ timeout: 10000 }); // call putc was stepped over: next is jmp .key
 await debug.getByRole("button", { name: "Continue" }).click();
 await page.waitForFunction(() => /Type something: a$/.test(document.querySelector('[aria-label="Serial output"]')?.textContent?.trim() ?? ""), null, { timeout: 15000 });
 await debug.getByRole("button", { name: "Remove breakpoint 7C1A" }).click();

@@ -27,9 +27,12 @@ Nothing in the terminal is simulated: commands are executed by the guest's own `
   from a disk image in your project. The template has a 512-byte OS in `boot/boot.asm`; build it with `nasm`
   in the Linux terminal (`cd boot && make`) and boot it, with a serial log below the screen.
 - **Debug your OS.** With an image running, the Display tab shows registers (with flags and real/protected mode),
-  a live memory dump (or one that follows EIP), *Pause*/*Continue*, and address breakpoints. The emulator has
-  no single-step or breakpoint hook, so a breakpoint temporarily patches `jmp $` over the instruction, which
-  works for code that runs per event (a key press, an interrupt); see `src/os/runtime/debugger.ts` for the limits.
+  a live memory dump (or one that follows EIP), a disassembly of the code ahead (click a line to set a
+  breakpoint), *Pause*, *Continue*, *Step* and address breakpoints. The emulator has no single-step or
+  breakpoint hook, so the debugger has its own x86 decoder (`src/os/runtime/x86.ts`, checked against `nasm`
+  on about 300 instructions in 16- and 32-bit code) and parks the CPU with a temporary `jmp $`. Step runs one
+  instruction (a call or interrupt counts as one); breakpoints stop on every pass of a loop. Limits: protected
+  mode assumes flat segments, and x87/SSE decode only as far as their length.
 - **A real display.** The *Display* tab shows the machine's VGA screen, with a login shell on `tty1`, and sends your
   keyboard (and mouse, in graphics modes) to the guest's PS/2 devices. Text and pixel modes both work, so a
   bare-metal OS or a framebuffer program has somewhere to draw.
@@ -171,10 +174,9 @@ Phase 4 added the display pane (VGA text and graphics, keyboard, mouse).
 
 Phase 5 added bare-metal boot of your own disk images (nasm and binutils are in the Linux image).
 
-Phase 6 added the bare-metal debugger.
+Phase 6 added the bare-metal debugger, with an x86 decoder for disassembly and single-stepping.
 
-Next: a kernel with framebuffer support for a desktop; true single-stepping and a disassembler for the
-debugger (needs an x86 decoder).
+Next: a kernel with framebuffer support for a desktop.
 
 ## Third-party software
 

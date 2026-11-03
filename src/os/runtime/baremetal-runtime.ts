@@ -48,18 +48,22 @@ export class BareMetalRuntime {
   resume() {
     if (this.status === "running") this.send({ t: "debug", op: "resume" });
   }
+  /** Runs one instruction (calls and interrupts count as one). Only while paused. */
+  step() {
+    if (this.status === "running") this.send({ t: "debug", op: "step" });
+  }
   /** Flat addresses to break at. Remembered across boots; those in the boot sector work from the first instruction. */
   setBreakpoints(addresses: number[]) {
     this.breakpoints = [...addresses];
     this.send({ t: "breakpoints", addresses });
   }
   /** Registers, memory window and breakpoint state of the running machine (null if none is running). */
-  inspect(memory?: { addr: number; length: number }): Promise<DebugSnapshot | null> {
+  inspect(memory?: { addr: number; length: number }, codeLines = 0): Promise<DebugSnapshot | null> {
     if (this.status !== "running" || !this.worker) return Promise.resolve(null);
     const id = this.nextInspect++;
     return new Promise((resolve) => {
       this.inspects.set(id, resolve);
-      this.send({ t: "inspect", id, memory });
+      this.send({ t: "inspect", id, memory, code: codeLines });
       setTimeout(() => {
         if (this.inspects.delete(id)) resolve(null);
       }, 2000);
