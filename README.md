@@ -14,6 +14,8 @@ Nothing in the terminal is simulated: commands are executed by the guest's own `
 - **Author the OS itself** in the `system/` folder: hostname, boot services (`/etc/rc.d`), shell
   configuration. It is laid over the OS at every boot and saved with the project.
 - **Run file** executes the open `.sh`, `.c` or Makefile in the terminal, visibly, as if you typed it.
+- **Keep build output out of the editor** with a `.simosignore` file (names, `*.o` globs, `dir/`,
+  `/anchored`); `node_modules/` and `.git/` are always ignored. Ignored files stay inside the OS.
 - Power on / Power off / Restart / Reset the machine; the project survives all of them and page reloads.
 
 ## Quick start
@@ -32,7 +34,8 @@ run it again, or `echo hi > new.txt` in the terminal and watch it appear in the 
 | `npm test` | all tests (unit + real-Linux integration) |
 | `npm run test:unit` | fast unit tests (filesystem, persistence, sync engine) |
 | `npm run test:integration` | boots the real kernel inside Node and drives it |
-| `npm run e2e` | boots the OS in Edge/Chrome via Playwright and drives the UI (needs the dev server on :3123, or pass a URL) |
+| `npm run e2e` | boots the production build in Edge/Chrome via Playwright and drives the UI (run `npm run build` first; `E2E_CHANNEL=chrome` to pick the browser; or pass a URL) |
+| `node scripts/jank.mjs` | measures frame gaps on the page while the guest runs a heavy loop (`INLINE=1` compares the no-worker mode) |
 | `npm run typecheck` | TypeScript |
 
 ## Runtime decision
@@ -66,7 +69,8 @@ Not simulated but constrained by the platform, so know the limits:
   is a reproducible artifact, the project is your data.
 * The terminal is a serial console (`ttyS0`). Window-size changes reach the guest at the next prompt.
 * File modes are not synced back to the editor. Files with a `#!` header are created executable.
-* Files above 4 MB created in the guest are not mirrored into the editor.
+* Files above 4 MB created in the guest are not mirrored into the editor, and files above 512 KB are
+  change-detected by size and mtime rather than content.
 
 ## Architecture
 
@@ -96,8 +100,10 @@ write-behind). The running guest's project directory is the same 9p tree the emu
 * **Editor to guest:** every `MemoryFS` event (write, mkdir, rename, remove) is applied to the guest
   tree immediately, in order, with the data snapshotted at event time. The root is mounted with
   `cache=mmap`, so the guest sees the change on its next read (no stale page cache).
-* **Guest to editor:** the guest tree is scanned every 400 ms; content fingerprints identify
-  creations, edits and deletions made by shell commands. Echo is suppressed with an origin tag and a
+* **Guest to editor:** the guest tree is scanned every 400 ms. A scan is metadata-only: the 9p
+  server is wrapped to learn which inodes were written, and only those are re-read and re-hashed.
+  Ignored directories are not entered at all. Fingerprints identify creations, edits and deletions
+  made by shell commands. Echo is suppressed with an origin tag and a
   "last agreed state" table, so neither side re-imports its own changes.
 * Conflicts: last writer wins. Stopping the OS first pulls in pending guest changes.
 * On boot, the project is copied into the guest before the CPU starts, so the first prompt already
@@ -112,6 +118,12 @@ a different `bootFiles` set. The runtime exposes the console and guest filesyste
 already emulates VGA and PS/2) and a desktop pane next to the terminal. The VFS, persistence, sync
 and studio layers do not change.
 
+The emulator runs in a **Web Worker** (`v86.worker.ts`); the page talks to it through typed messages
+(`worker-protocol.ts`) and reaches the guest filesystem over an RPC proxy, so the same `SyncEngine`
+works unchanged. In a heavy-loop test the worst frame gap dropped from 50 ms to 34 ms (headless
+Edge); the gain is modest because the emulator already yields often. Add `?inline` to the page URL to
+run it on the main thread instead, and browsers without workers fall back automatically.
+
 Isolation: user code runs only inside the emulated machine (a WASM sandbox with no network and no
 access to the host page); the app talks to it solely through the console and the 9p tree.
 
@@ -122,9 +134,10 @@ the OS image by `npm run build:os`), so the studio works offline after the first
 
 ## Roadmap
 
-Phase 1 (done): editable OS overlay and boot services, Run file, visible sync errors and edit-conflict notices.
-Next: CI and sync scalability (ignore rules, worker-hosted emulator), multiple terminals and fast resume,
-find-in-files and zip import/export, then a display pane for graphical systems.
+Done: Phase 1 (editable OS overlay and boot services, Run file, visible sync errors and conflict notices)
+and Phase 2 (ignore rules, cheaper change detection, emulator in a Web Worker, CI).
+Next: multiple terminals, fast resume (saved VM state), find-in-files, zip import/export, then a
+display pane for graphical systems.
 
 ## Third-party software
 

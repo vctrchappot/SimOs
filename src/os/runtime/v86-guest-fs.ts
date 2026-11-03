@@ -1,4 +1,5 @@
 import { basename, dirname, normalize } from "../vfs/path";
+import { createIgnore } from "../vfs/ignore";
 import { fingerprint } from "./sync";
 import type { GuestFS, GuestStat } from "./types";
 
@@ -12,6 +13,8 @@ export interface Fs9p {
   Read(id: number, offset: number, count: number): Promise<Uint8Array | null>;
   Unlink(parentid: number, name: string): number;
   Rename(oldDir: number, oldName: string, newDir: number, newName: string): Promise<number>;
+  /** Called by the 9p server for every guest write; wrapped to learn which inodes changed. */
+  Write?(id: number, offset: number, count: number, buffer: Uint8Array | null): Promise<void>;
 }
 
 export interface Inode {
@@ -28,13 +31,40 @@ const S_IFREG = 0x8000;
 /** Files up to this size are fingerprinted by content; larger ones by size and mtime. */
 const HASH_LIMIT = 512 * 1024;
 
+/**
+ * Inodes written to since they were last fingerprinted. Shared by every view of one emulator.
+ * The 9p server never updates mtime on writes, so without this hook an edit that keeps the
+ * file size would be invisible, and the only safe alternative is hashing every file on every scan.
+ */
+const dirtyInodes = new WeakMap<object, Set<number>>();
+
+function trackWrites(fs9p: Fs9p): Set<number> | null {
+  const existing = dirtyInodes.get(fs9p);
+  if (existing) return existing;
+  const original = fs9p.Write;
+  if (typeof original !== "function") return null; // unknown v86 version: caller falls back to hashing everything
+  const dirty = new Set<number>();
+  fs9p.Write = function (this: unknown, id, ...rest) {
+    dirty.add(id);
+    return original.call(fs9p, id, ...rest);
+  };
+  dirtyInodes.set(fs9p, dirty);
+  return dirty;
+}
+
 /** Project directory of a running v86 guest, exposed through the host side of its 9p device. */
 export class V86GuestFS implements GuestFS {
+  /** Last fingerprint per inode, valid while the inode is clean and its size and mtime are unchanged. */
+  private sigCache = new Map<number, { size: number; mtime: number; sig: string }>();
+  private dirty: Set<number> | null;
+
   constructor(
     private fs9p: Fs9p,
     /** Absolute guest path of the project directory, e.g. /root/project. */
     private root: string,
-  ) {}
+  ) {
+    this.dirty = trackWrites(fs9p);
+  }
 
   private abs(path: string): string {
     const p = normalize(path);
@@ -57,7 +87,8 @@ export class V86GuestFS implements GuestFS {
     return id;
   }
 
-  async scan(): Promise<Map<string, GuestStat>> {
+  async scan(ignore?: string): Promise<Map<string, GuestStat>> {
+    const skip = ignore === undefined ? undefined : createIgnore(ignore);
     const out = new Map<string, GuestStat>();
     const rootHit = this.fs9p.SearchPath(this.root);
     if (rootHit.id === -1) return out;
@@ -69,9 +100,11 @@ export class V86GuestFS implements GuestFS {
         const node = this.fs9p.GetInode(childId);
         const type = node.mode & S_IFMT;
         if (type === S_IFDIR) {
+          if (skip?.(path, true)) continue;
           out.set(path, { kind: "dir", size: 0, sig: "d" });
           await walk(childId, path);
         } else if (type === S_IFREG) {
+          if (skip?.(path, false)) continue;
           out.set(path, { kind: "file", size: node.size, sig: await this.signature(childId, node) });
         }
       }
@@ -82,8 +115,15 @@ export class V86GuestFS implements GuestFS {
 
   private async signature(id: number, node: Inode): Promise<string> {
     if (node.size > HASH_LIMIT) return `big:${node.size}:${node.mtime}`;
-    if (node.size === 0) return fingerprint(new Uint8Array());
-    return fingerprint((await this.fs9p.Read(id, 0, node.size)) ?? new Uint8Array());
+    const cached = this.sigCache.get(id);
+    const clean = this.dirty ? !this.dirty.has(id) : false;
+    if (cached && clean && cached.size === node.size && cached.mtime === node.mtime) return cached.sig;
+    // Clear before reading: a write that lands while we hash marks the inode dirty again.
+    this.dirty?.delete(id);
+    const sig =
+      node.size === 0 ? fingerprint(new Uint8Array()) : fingerprint((await this.fs9p.Read(id, 0, node.size)) ?? new Uint8Array());
+    this.sigCache.set(id, { size: node.size, mtime: node.mtime, sig });
+    return sig;
   }
 
   async stat(path: string): Promise<GuestStat | null> {
@@ -109,6 +149,7 @@ export class V86GuestFS implements GuestFS {
       const node = this.fs9p.GetInode(hit.id);
       if ((node.mode & S_IFMT) !== S_IFREG) throw new Error(`EISDIR: ${path}`);
       // Replace content in place so open file descriptors in the guest keep working.
+      this.dirty?.add(hit.id);
       await this.fs9p.set_data(hit.id, copy);
       node.size = copy.length;
       node.mtime = node.ctime = Math.floor(Date.now() / 1000);

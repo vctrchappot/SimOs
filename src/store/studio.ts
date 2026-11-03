@@ -1,10 +1,9 @@
 "use client";
 
 import { create } from "zustand";
-import { browserEnvironment } from "@/os/runtime/browser";
+import { createBrowserRuntime } from "@/os/runtime/create-runtime";
 import { defaultProfile } from "@/os/runtime/profiles";
 import type { RuntimeStatus } from "@/os/runtime/types";
-import { V86Runtime } from "@/os/runtime/v86-runtime";
 import { Studio } from "@/os/studio";
 import { runCommandFor } from "@/os/run-command";
 import { PROJECT_TEMPLATE } from "@/os/template";
@@ -120,7 +119,7 @@ export const useStudio = create<StudioState>((set, get) => {
     async init() {
       if (initStarted) return;
       initStarted = true;
-      const runtime = new V86Runtime(defaultProfile, browserEnvironment);
+      const runtime = createBrowserRuntime(defaultProfile);
       const studio = new Studio({
         runtime,
         store: new IdbProjectStore("simos-project"),

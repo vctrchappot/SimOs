@@ -23,6 +23,7 @@ export {
 export { SyncEngine, fingerprint, type SyncOptions } from "../runtime/sync";
 export type { GuestFS, GuestStat, OSProfile, OSRuntime, RuntimeStatus } from "../runtime/types";
 export { V86Runtime, type V86Environment } from "../runtime/v86-runtime";
+export { WorkerRuntime } from "../runtime/worker-runtime";
 export { V86GuestFS } from "../runtime/v86-guest-fs";
 export { alpineProfile, buildrootProfile, defaultProfile, READY_MARKER } from "../runtime/profiles";
 export { applyOverlay, OVERLAY_DIR } from "../overlay";

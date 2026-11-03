@@ -61,6 +61,12 @@ echo "uptime : $(uptime -p)"
 echo "files  : $(find . -type f | wc -l) in $(pwd)"
 `,
 
+  ".simosignore": `# Paths listed here stay inside the OS and never show up in the editor.
+# node_modules/ and .git/ are always ignored. Supports names, *.glob, dir/ and /anchored.
+hello
+*.o
+`,
+
   // The system/ folder is laid over the OS root at every boot: system/etc/hostname becomes /etc/hostname.
   "system/etc/hostname": "my-os\n",
   "system/etc/rc.d/10-welcome.sh": `#!/bin/sh

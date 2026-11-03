@@ -14,8 +14,12 @@ export interface GuestStat {
  * Implemented over the emulator's 9p filesystem; mocked in unit tests.
  */
 export interface GuestFS {
-  /** Every entry below the root, keyed by project path. Symlinks and special files are skipped. */
-  scan(): Promise<Map<string, GuestStat>>;
+  /**
+   * Every entry below the root, keyed by project path. Symlinks and special files are skipped.
+   * `ignore` is the text of the project's ignore file; matching entries are left out and
+   * matching directories are not entered. (Text, not a function, so it can cross a worker boundary.)
+   */
+  scan(ignore?: string): Promise<Map<string, GuestStat>>;
   stat(path: string): Promise<GuestStat | null>;
   read(path: string): Promise<Uint8Array>;
   write(path: string, data: Uint8Array): Promise<void>;

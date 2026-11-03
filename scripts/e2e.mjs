@@ -1,8 +1,27 @@
 // Browser smoke test: boots the real Arch Linux guest in Edge/Chrome and drives the studio UI.
-// Usage: node scripts/e2e.mjs [url]   (start `npm run dev` or `npm start` first)
+// Usage: node scripts/e2e.mjs [url]
+// Without a URL it serves the production build itself (run `npm run build` first).
+// E2E_CHANNEL picks the browser (default msedge; CI uses chrome).
+import { spawn } from "node:child_process";
 import { chromium } from "playwright-core";
 
-const url = process.argv[2] ?? "http://localhost:3123";
+let server;
+process.on("exit", () => server?.kill());
+process.on("uncaughtException", (e) => {
+  console.error(e);
+  server?.kill();
+  process.exit(1);
+});
+let url = process.argv[2];
+if (!url) {
+  url = "http://localhost:3123";
+  server = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-p", "3123"], { stdio: "ignore" });
+  for (let i = 0; ; i++) {
+    if (await fetch(url).then((r) => r.ok, () => false)) break;
+    if (i > 60) throw new Error("server did not start; did you run npm run build?");
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
 const channel = process.env.E2E_CHANNEL ?? "msedge";
 const log = (...a) => console.log("[e2e]", ...a);
 
@@ -66,3 +85,5 @@ await waitTerm(/created in bash[^]*edited in monaco/);
 log("project recovered after reload");
 await browser.close();
 log("PASS");
+server?.kill();
+process.exit(0);

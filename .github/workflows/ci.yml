@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+      # The OS image (kernel + Alpine userland) is downloaded once and cached.
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: os-image-${{ hashFiles('scripts/build-rootfs.mjs') }}
+      - run: npm run build:os
+
+      # Unit tests plus integration tests that boot real Linux inside Node.
+      - run: npm test
+      - run: npm run build
+
+      # Boots the production build in a real browser and drives the UI.
+      - run: npm run e2e
+        env:
+          E2E_CHANNEL: chrome

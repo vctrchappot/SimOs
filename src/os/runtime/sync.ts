@@ -1,4 +1,5 @@
 import type { MemoryFS } from "../vfs/memory-fs";
+import { createIgnore, IGNORE_FILE, type IgnoreMatcher } from "../vfs/ignore";
 import { isInside, normalize } from "../vfs/path";
 import type { FsEvent } from "../vfs/types";
 import type { GuestFS, GuestStat } from "./types";
@@ -33,6 +34,8 @@ export class SyncEngine {
   private timer: ReturnType<typeof setInterval> | null = null;
   private unsubscribe: (() => void) | null = null;
   private stopped = false;
+  private ignoreText = "";
+  private ignoreFn: IgnoreMatcher = createIgnore();
   private opts: Required<Omit<SyncOptions, "onError">> & Pick<SyncOptions, "onError">;
 
   constructor(
@@ -73,6 +76,16 @@ export class SyncEngine {
     return this.enqueue(() => this.pullFromGuest());
   }
 
+  /** Text of the project's ignore file; the matcher is rebuilt only when it changes. */
+  private ignoreRules(): string {
+    const text = this.fs.exists(IGNORE_FILE) ? this.fs.readText(IGNORE_FILE) : "";
+    if (text !== this.ignoreText) {
+      this.ignoreText = text;
+      this.ignoreFn = createIgnore(text);
+    }
+    return text;
+  }
+
   private enqueue(job: () => Promise<void>): Promise<void> {
     const run = this.queue.then(async () => {
       if (this.stopped) return;
@@ -87,7 +100,7 @@ export class SyncEngine {
   }
 
   private async pushAll(): Promise<void> {
-    const existing = await this.guest.scan();
+    const existing = await this.guest.scan(this.ignoreRules());
     const wanted = new Set(this.fs.list().map((e) => e.path));
     // Remove guest leftovers that are not in the project (deepest first).
     for (const path of [...existing.keys()].sort().reverse()) {
@@ -132,12 +145,18 @@ export class SyncEngine {
   }
 
   private async pullFromGuest(): Promise<void> {
-    const now = await this.guest.scan();
+    const now = await this.guest.scan(this.ignoreRules());
+    const ignore = this.ignoreFn;
 
     // Deletions and kind changes first.
     for (const path of [...this.known.keys()].sort().reverse()) {
       const before = this.known.get(path)!;
       const after = now.get(path);
+      if (!after && ignore(path, before.kind === "dir")) {
+        // Newly ignored (or never scanned): not a deletion, just stop tracking it.
+        this.known.delete(path);
+        continue;
+      }
       if ((!after || after.kind !== before.kind) && this.fs.exists(path)) this.fs.remove(path, "guest");
       if (!after) this.known.delete(path);
     }

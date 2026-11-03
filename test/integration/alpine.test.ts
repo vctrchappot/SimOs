@@ -72,6 +72,22 @@ describe.skipIf(!built)("Alpine Linux with bash", () => {
     expect(studio.syncErrors).toEqual([]);
   });
 
+  it("detects same-size edits made in the guest and keeps node_modules and ignored build output out of the editor", async () => {
+    await sh("printf aaa > same.txt");
+    await studio["sync"]!.poll();
+    expect(studio.fs.readText("/same.txt")).toBe("aaa");
+    await sh("printf bbb > same.txt");
+    await studio["sync"]!.poll();
+    expect(studio.fs.readText("/same.txt")).toBe("bbb");
+
+    await sh("mkdir -p node_modules/pkg && echo x > node_modules/pkg/index.js && make hello >/dev/null && cp hello other.o");
+    await studio["sync"]!.poll();
+    expect(studio.fs.exists("/node_modules")).toBe(false);
+    expect(studio.fs.exists("/hello")).toBe(false); // listed in the template's .simosignore
+    expect(studio.fs.exists("/other.o")).toBe(false);
+    expect((await sh("ls node_modules/pkg")).out.trim()).toBe("index.js"); // still there in the OS
+  });
+
   it("applies the system overlay at boot: hostname, boot services and login-shell config", async () => {
     expect(m.bootLog()).toContain("[simos] starting 10-welcome.sh");
     expect(m.bootLog()).toContain("welcome service: starting on my-os");

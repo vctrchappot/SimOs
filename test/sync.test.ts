@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MemoryFS } from "@/os/vfs/memory-fs";
 import { fingerprint, SyncEngine } from "@/os/runtime/sync";
 import type { GuestFS, GuestStat } from "@/os/runtime/types";
+import { createIgnore } from "@/os/vfs/ignore";
 import { isInside, normalize } from "@/os/vfs/path";
 
 /** An in-memory stand-in for the guest's project directory; it is what the OS "sees". */
@@ -10,8 +11,9 @@ class FakeGuest implements GuestFS {
   private sig(v: Uint8Array | "dir"): GuestStat {
     return v === "dir" ? { kind: "dir", size: 0, sig: "d" } : { kind: "file", size: v.length, sig: fingerprint(v) };
   }
-  async scan() {
-    return new Map([...this.files].map(([k, v]) => [k, this.sig(v)] as const));
+  async scan(ignore?: string) {
+    const skip = ignore === undefined ? undefined : createIgnore(ignore);
+    return new Map([...this.files].filter(([k, v]) => !skip?.(k, v === "dir")).map(([k, v]) => [k, this.sig(v)] as const));
   }
   async stat(path: string) {
     const v = this.files.get(normalize(path));
